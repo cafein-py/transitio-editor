@@ -29,12 +29,5 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      # The editor needs transitio's FeedEditor/edit module, which is newer
-      # than the released 0.1.0 — install core from git until transitio
-      # 0.2.0 is on PyPI, then switch to the PyPI dependency.
-      - run: pip install "transitio[snap] @ git+https://github.com/cafein-py/transitio"
-      # --no-deps because the declared floor is the unreleased core 0.2;
-      # drop the git install and this flag once transitio 0.2.0 is on PyPI.
-      - run: pip install --no-deps -e .
-      - run: pip install fastapi uvicorn pytest
+      - run: pip install -e ".[snap]" pytest
       - run: pytest tests/ -v
