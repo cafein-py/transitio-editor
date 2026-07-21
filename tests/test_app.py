@@ -334,3 +334,102 @@ def test_ids_with_slashes_route_correctly(tmp_path):
     assert ok.status_code == 200
     table = client.get("/api/tables/stops.txt").json()
     assert table["rows"][0]["stop_name"] == "Renamed"
+
+
+def test_timetable_endpoints(editor, tmp_path):
+    client = TestClient(create_app(editor))
+    routes = client.get("/api/routes").json()["routes"]
+    assert routes[0]["route_id"] == "r1"
+
+    trips = client.get("/api/routes/r1/trips").json()["trips"]
+    assert trips[0]["trip_id"] == "t1"
+    assert trips[0]["stop_count"] == 2
+    assert trips[0]["frequency_windows"][0]["headway_secs"] == "600"
+
+    detail = client.get("/api/trips/t1/times").json()
+    assert [row["stop_id"] for row in detail["times"]] == ["s1", "s2"]
+    assert detail["times"][0]["stop_name"] == "Kamppi"
+
+    updated = client.put(
+        "/api/trips/t1/times",
+        json={
+            "times": {"2": {"arrival_time": "6:07:30", "departure_time": "06:08:00"}}
+        },
+    )
+    assert updated.status_code == 200
+    detail = client.get("/api/trips/t1/times").json()
+    assert detail["times"][1]["arrival_time"] == "06:07:30"
+    assert detail["times"][1]["departure_time"] == "06:08:00"
+
+    assert (
+        client.put(
+            "/api/trips/t1/times",
+            json={"times": {"9": {"arrival_time": "06:00:00"}}},
+        ).status_code
+        == 422
+    )
+    assert (
+        client.put(
+            "/api/trips/t1/times",
+            json={"times": {"1": {"arrival_time": "6:70:00"}}},
+        ).status_code
+        == 422
+    )
+    assert client.get("/api/trips/absent/times").status_code == 404
+
+    assert client.delete("/api/trips/t1").status_code == 200
+    assert client.delete("/api/trips/t1").status_code == 404
+    table = client.get("/api/tables/stop_times.txt").json()
+    assert table["total"] == 0
+    frequencies = client.get("/api/tables/frequencies.txt").json()
+    assert frequencies["total"] == 0
+
+
+def test_trip_time_updates_are_atomic_and_blankable(editor):
+    client = TestClient(create_app(editor))
+    response = client.put(
+        "/api/trips/t1/times",
+        json={
+            "times": {
+                "1": {"arrival_time": "07:00:00"},
+                "2": {"arrival_time": "7:99:00"},
+            }
+        },
+    )
+    assert response.status_code == 422
+    detail = client.get("/api/trips/t1/times").json()
+    assert detail["times"][0]["arrival_time"] == "06:00:00"  # unchanged
+
+    cleared = client.put(
+        "/api/trips/t1/times",
+        json={"times": {"2": {"arrival_time": ""}}},
+    )
+    assert cleared.status_code == 200
+    detail = client.get("/api/trips/t1/times").json()
+    assert detail["times"][1]["arrival_time"] == ""
+
+
+def test_drop_trip_cascades_trip_references(editor):
+    editor._append(
+        "transfers.txt",
+        {
+            "from_stop_id": "",
+            "to_stop_id": "",
+            "from_trip_id": "t1",
+            "to_trip_id": "",
+            "transfer_type": "1",
+        },
+    )
+    editor._append(
+        "attributions.txt",
+        {
+            "attribution_id": "a1",
+            "trip_id": "t1",
+            "organization_name": "Org",
+            "is_producer": "1",
+        },
+    )
+    client = TestClient(create_app(editor))
+    assert client.delete("/api/trips/t1").status_code == 200
+    assert client.get("/api/tables/transfers.txt").json()["total"] == 0
+    assert client.get("/api/tables/attributions.txt").json()["total"] == 0

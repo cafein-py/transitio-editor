@@ -33,3 +33,10 @@ input.offset { width: 70px; }
 .notice ol { margin: 2px 0; padding-left: 18px; }
 .context { cursor: pointer; }
 .context:hover { text-decoration: underline; }
+#trip-list { list-style: none; margin: 6px 0; padding: 0; max-height: 140px; overflow-y: auto; font-size: 12px; }
+#trip-list li { cursor: pointer; padding: 2px 4px; border-radius: 4px; }
+#trip-list li:hover { background: #f0eee9; }
+#trip-list li.selected { background: #35507a; color: #fff; }
+table.times { width: 100%; border-collapse: collapse; font-size: 12px; }
+table.times th { text-align: left; color: #666; font-weight: 500; }
+table.times input { width: 76px; padding: 3px; }

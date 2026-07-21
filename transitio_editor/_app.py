@@ -391,6 +391,56 @@ def create_app(editor, *, osm_pbf=None, network_type="driving", allowed_hosts=No
             raise HTTPException(422, str(error)) from None
         return {"type": "Feature", "geometry": line.__geo_interface__}
 
+    @app.get("/api/routes")
+    def routes_list():
+        from transitio_editor import _timetable
+
+        with lock:
+            return {"routes": _timetable.list_routes(editor)}
+
+    @app.get("/api/routes/{route_id:path}/trips")
+    def route_trips(route_id: str):
+        from transitio_editor import _timetable
+
+        with lock:
+            return {"trips": _timetable.list_trips(editor, route_id)}
+
+    @app.get("/api/trips/{trip_id:path}/times")
+    def get_trip_times(trip_id: str):
+        from transitio_editor import _timetable
+
+        with lock:
+            records = _timetable.trip_times(editor, trip_id)
+        if records is None:
+            raise HTTPException(404, f"no trip {trip_id}")
+        return {"trip_id": trip_id, "times": records}
+
+    @app.put("/api/trips/{trip_id:path}/times")
+    def put_trip_times(trip_id: str, payload: dict = Body(...)):
+        from transitio_editor import _timetable
+
+        try:
+            with lock:
+                _timetable.set_trip_times(editor, trip_id, payload["times"])
+        except KeyError as error:
+            raise HTTPException(422, f"missing field {error}") from None
+        except LookupError as error:
+            raise HTTPException(404, str(error)) from None
+        except (TypeError, ValueError, AttributeError) as error:
+            raise HTTPException(422, str(error)) from None
+        return {"ok": True}
+
+    @app.delete("/api/trips/{trip_id:path}")
+    def delete_trip(trip_id: str):
+        from transitio_editor import _timetable
+
+        try:
+            with lock:
+                _timetable.drop_trip(editor, trip_id)
+        except LookupError as error:
+            raise HTTPException(404, str(error)) from None
+        return {"ok": True}
+
     @app.post("/api/validate")
     def validate(payload: dict = Body(default={})):
         """Validate the current in-memory feed without persisting it."""
