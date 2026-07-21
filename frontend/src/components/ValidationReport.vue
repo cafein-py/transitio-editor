@@ -14,9 +14,9 @@ const rowCounts = computed(() =>
 );
 const serviceWindow = computed(() => store.report && store.report.service_window);
 
-const expandedCode = ref(null);
-function toggleGroup(code) {
-  expandedCode.value = expandedCode.value === code ? null : code;
+const expandedGroup = ref(null);
+function toggleGroup(id) {
+  expandedGroup.value = expandedGroup.value === id ? null : id;
 }
 </script>
 
@@ -53,15 +53,15 @@ function toggleGroup(code) {
 
       <div class="panel">
         <div v-if="!groups.length" class="hint">no notices — the feed is clean</div>
-        <div v-for="group in groups" :key="group.code" class="notice">
+        <div v-for="group in groups" :key="group.id" class="notice">
           <div
             class="notice-head"
             :class="group.severity.toLowerCase()"
-            @click="toggleGroup(group.code)"
+            @click="toggleGroup(group.id)"
           >
             {{ group.severity }} · {{ group.code }} × {{ group.count }}
           </div>
-          <ol v-if="expandedCode === group.code">
+          <ol v-if="expandedGroup === group.id">
             <li
               v-for="(context, index) in group.contexts"
               :key="index"

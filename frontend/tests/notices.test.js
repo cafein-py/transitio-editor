@@ -45,6 +45,22 @@ describe("groupNotices", () => {
     expect(group.count).toBe(50);
     expect(group.contexts).toHaveLength(5);
   });
+  it("splits one code across severities", () => {
+    const mixed = {
+      notices: [
+        { code: "c", severity: "ERROR", context: {} },
+        { code: "c", severity: "WARNING", context: {} },
+        { code: "c", severity: "WARNING", context: {} },
+      ],
+    };
+    const groups = groupNotices(mixed);
+    expect(groups).toHaveLength(2);
+    expect(groups.map((g) => [g.severity, g.count])).toEqual([
+      ["ERROR", 1],
+      ["WARNING", 2],
+    ]);
+    expect(new Set(groups.map((g) => g.id)).size).toBe(2);
+  });
   it("is empty for no report", () => {
     expect(groupNotices(null)).toEqual([]);
   });
