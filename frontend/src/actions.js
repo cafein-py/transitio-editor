@@ -19,6 +19,12 @@ export function wrap(action) {
 
 export function setMode(mode) {
   store.mode = mode;
+  // A pending "move stop" would otherwise hijack the next map click in
+  // the new mode; changing mode cancels it.
+  if (store.movingStop) {
+    store.movingStop = null;
+    store.status = "";
+  }
   if (mode !== "draw") mapBridge.resetDraw();
   mapBridge.setCursor(mode === "select" ? "" : "crosshair");
 }
