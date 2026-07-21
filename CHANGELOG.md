@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+- Validation-notices panel: a Validate button checks the current
+  in-memory feed without saving (new ``POST /api/validate`` endpoint,
+  validating a temporary snapshot), and both it and Save populate a
+  grouped notice list in the sidebar — ordered by severity, expandable
+  to individual notice contexts, and clicking a context highlights the
+  offending stops and shapes on the map (flying to the first stop).
+
 ### Changed
 
 - The frontend is now a Vue application (vendored ``vue.global.prod.js``,

@@ -15,6 +15,9 @@ const store = Vue.reactive({
   tripPicking: false,
   saving: false,
   saveResult: null, // { clean, message }
+  report: null, // last validation report
+  reportStale: false, // edits happened after the last validation
+  highlightActive: false,
   status: "",
 });
 
@@ -86,6 +89,7 @@ map.addControl(new maplibregl.NavigationControl());
 let drawnPoints = []; // [lat, lon]
 let previewCoords = []; // [lon, lat]
 let drawSequence = 0; // discards out-of-order snap responses
+let lastStops = null; // latest stops GeoJSON, for highlight fly-to
 
 function renderPreview() {
   const source = map.getSource("preview");
@@ -100,6 +104,7 @@ function renderPreview() {
 function resetDraw() {
   drawnPoints = [];
   previewCoords = [];
+  drawSequence += 1; // invalidate any in-flight snap response
   renderPreview();
 }
 
@@ -115,6 +120,7 @@ async function refreshLayers(fit) {
     api("GET", "/api/stops"),
     api("GET", "/api/shapes"),
   ]);
+  lastStops = stops;
   map.getSource("stops").setData(stops);
   map.getSource("shapes").setData(shapes);
   if (fit && stops.features.length) {
@@ -207,6 +213,13 @@ map.on("load", async () => {
     },
   });
   map.addLayer({
+    id: "shapes-highlight",
+    type: "line",
+    source: "shapes",
+    filter: ["in", ["get", "shape_id"], ["literal", []]],
+    paint: { "line-color": "#d81b60", "line-width": 6, "line-opacity": 0.6 },
+  });
+  map.addLayer({
     id: "stops",
     type: "circle",
     source: "stops",
@@ -215,6 +228,18 @@ map.on("load", async () => {
       "circle-color": "#e67e22",
       "circle-stroke-color": "#fff",
       "circle-stroke-width": 1.5,
+    },
+  });
+  map.addLayer({
+    id: "stops-highlight",
+    type: "circle",
+    source: "stops",
+    filter: ["in", ["get", "stop_id"], ["literal", []]],
+    paint: {
+      "circle-radius": 10,
+      "circle-color": "rgba(216, 27, 96, 0.35)",
+      "circle-stroke-color": "#d81b60",
+      "circle-stroke-width": 2,
     },
   });
 
@@ -253,6 +278,7 @@ function wrap(action) {
     try {
       await action(...args);
       store.status = "";
+      if (store.report) store.reportStale = true;
     } catch (error) {
       store.status = error.message;
     }
@@ -332,6 +358,90 @@ Vue.createApp({
       await refreshAll(false);
     });
 
+    const expandedCode = Vue.ref(null);
+    const toggleGroup = (code) => {
+      expandedCode.value = expandedCode.value === code ? null : code;
+    };
+
+    const noticeGroups = Vue.computed(() => {
+      if (!store.report) return [];
+      const order = { ERROR: 0, WARNING: 1, INFO: 2 };
+      const groups = new Map();
+      for (const notice of store.report.notices) {
+        let group = groups.get(notice.code);
+        if (!group) {
+          group = {
+            code: notice.code,
+            severity: notice.severity,
+            count: 0,
+            contexts: [],
+          };
+          groups.set(notice.code, group);
+        }
+        group.count += 1;
+        if (group.contexts.length < 20) {
+          group.contexts.push(notice.context || {});
+        }
+      }
+      return [...groups.values()].sort(
+        (a, b) =>
+          (order[a.severity] ?? 3) - (order[b.severity] ?? 3) ||
+          b.count - a.count,
+      );
+    });
+
+    const describeContext = (context) => {
+      const parts = Object.entries(context).map(
+        ([key, value]) => `${key}=${value}`,
+      );
+      return parts.length ? parts.join(", ") : "(no context)";
+    };
+
+    const setHighlight = (stopIds, shapeIds) => {
+      map.setFilter("stops-highlight", [
+        "in",
+        ["get", "stop_id"],
+        ["literal", stopIds],
+      ]);
+      map.setFilter("shapes-highlight", [
+        "in",
+        ["get", "shape_id"],
+        ["literal", shapeIds],
+      ]);
+      store.highlightActive = stopIds.length > 0 || shapeIds.length > 0;
+    };
+
+    const clearHighlight = () => setHighlight([], []);
+
+    const highlightContext = (context) => {
+      const stopIds = [];
+      const shapeIds = [];
+      for (const [key, value] of Object.entries(context)) {
+        if (/stopid/i.test(key)) stopIds.push(String(value));
+        if (/shapeid/i.test(key)) shapeIds.push(String(value));
+      }
+      setHighlight(stopIds, shapeIds);
+      if (stopIds.length && lastStops) {
+        const hit = lastStops.features.find(
+          (feature) => feature.properties.stop_id === stopIds[0],
+        );
+        if (hit) {
+          map.flyTo({ center: hit.geometry.coordinates, zoom: 15 });
+        }
+      }
+    };
+
+    const validateFeed = async () => {
+      try {
+        const body = await api("POST", "/api/validate", {});
+        store.report = body.report;
+        store.reportStale = false;
+        store.status = "";
+      } catch (error) {
+        store.status = error.message;
+      }
+    };
+
     const saveFeed = async () => {
       store.saving = true;
       store.saveResult = null;
@@ -341,6 +451,8 @@ Vue.createApp({
           acc[notice.severity] = (acc[notice.severity] || 0) + 1;
           return acc;
         }, {});
+        store.report = saved.report;
+        store.reportStale = false;
         store.saveResult = {
           clean: saved.clean,
           message: saved.clean
@@ -359,6 +471,13 @@ Vue.createApp({
     return {
       store,
       forms,
+      expandedCode,
+      noticeGroups,
+      toggleGroup,
+      describeContext,
+      highlightContext,
+      clearHighlight,
+      validateFeed,
       setMode,
       cancelShape,
       finishShape,

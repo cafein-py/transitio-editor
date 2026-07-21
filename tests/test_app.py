@@ -310,3 +310,27 @@ def test_foreign_origin_posts_are_refused(editor, tmp_path):
         client.get("/api/feed", headers={"origin": "https://evil.example"}).status_code
         == 200
     )
+
+
+def test_validate_endpoint_without_saving(editor, tmp_path):
+    client = TestClient(create_app(editor))
+    body = client.post("/api/validate", json={"reference_date": "20260601"}).json()
+    assert not any(n["severity"] == "ERROR" for n in body["report"]["notices"])
+
+    broken = TestClient(create_app(FeedBuilder()))
+    body = broken.post("/api/validate", json={}).json()
+    assert any(n["code"] == "missing_required_file" for n in body["report"]["notices"])
+    assert client.post("/api/validate", json={"bogus_kwarg": 1}).status_code == 422
+
+
+def test_ids_with_slashes_route_correctly(tmp_path):
+    builder = FeedBuilder()
+    builder.add_agency("a", "A", "https://a.example", "Europe/Helsinki")
+    builder.add_stop("HSL/1234", "Slashy", 60.17, 24.94)
+    source = tmp_path / "feed.zip"
+    builder.save(source, check=False)
+    client = TestClient(create_app(FeedEditor(source)))
+    ok = client.patch("/api/stops/HSL%2F1234", json={"stop_name": "Renamed"})
+    assert ok.status_code == 200
+    table = client.get("/api/tables/stops.txt").json()
+    assert table["rows"][0]["stop_name"] == "Renamed"

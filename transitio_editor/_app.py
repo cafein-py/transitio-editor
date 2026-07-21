@@ -196,7 +196,7 @@ def create_app(editor, *, osm_pbf=None, network_type="driving", allowed_hosts=No
             raise HTTPException(422, str(error)) from None
         return {"ok": True}
 
-    @app.patch("/api/stops/{stop_id}")
+    @app.patch("/api/stops/{stop_id:path}")
     def update_stop(stop_id: str, payload: dict = Body(...)):
         try:
             with lock:
@@ -259,7 +259,7 @@ def create_app(editor, *, osm_pbf=None, network_type="driving", allowed_hosts=No
             raise HTTPException(422, str(error)) from None
         return {"ok": True}
 
-    @app.patch("/api/routes/{route_id}")
+    @app.patch("/api/routes/{route_id:path}")
     def update_route(route_id: str, payload: dict = Body(...)):
         try:
             with lock:
@@ -274,7 +274,7 @@ def create_app(editor, *, osm_pbf=None, network_type="driving", allowed_hosts=No
             raise HTTPException(422, str(error)) from None
         return {"ok": True}
 
-    @app.delete("/api/routes/{route_id}")
+    @app.delete("/api/routes/{route_id:path}")
     def drop_route(route_id: str):
         try:
             with lock:
@@ -304,7 +304,7 @@ def create_app(editor, *, osm_pbf=None, network_type="driving", allowed_hosts=No
             raise HTTPException(422, str(error)) from None
         return {"ok": True}
 
-    @app.post("/api/trips/{trip_id}/shift")
+    @app.post("/api/trips/{trip_id:path}/shift")
     def shift_trip(trip_id: str, payload: dict = Body(...)):
         try:
             with lock:
@@ -390,6 +390,20 @@ def create_app(editor, *, osm_pbf=None, network_type="driving", allowed_hosts=No
         except ValueError as error:
             raise HTTPException(422, str(error)) from None
         return {"type": "Feature", "geometry": line.__geo_interface__}
+
+    @app.post("/api/validate")
+    def validate(payload: dict = Body(default={})):
+        """Validate the current in-memory feed without persisting it."""
+        import tempfile
+
+        try:
+            with lock, tempfile.TemporaryDirectory() as scratch:
+                report = editor.save(
+                    os.path.join(scratch, "current.zip"), check=False, **payload
+                )
+        except (TypeError, ValueError) as error:
+            raise HTTPException(422, str(error)) from None
+        return {"report": report}
 
     @app.post("/api/save")
     def save(payload: dict = Body(default={})):
