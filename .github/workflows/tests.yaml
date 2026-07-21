@@ -1,0 +1,40 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install black flake8 flake8-bugbear
+      - run: black --check transitio_editor tests
+      - run: flake8 transitio_editor tests
+
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.10", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      # The editor needs transitio's FeedEditor/edit module, which is newer
+      # than the released 0.1.0 — install core from git until transitio
+      # 0.2.0 is on PyPI, then switch to the PyPI dependency.
+      - run: pip install "transitio[snap] @ git+https://github.com/cafein-py/transitio"
+      # --no-deps because the declared floor is the unreleased core 0.2;
+      # drop the git install and this flag once transitio 0.2.0 is on PyPI.
+      - run: pip install --no-deps -e .
+      - run: pip install fastapi uvicorn pytest
+      - run: pytest tests/ -v
