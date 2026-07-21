@@ -100,6 +100,29 @@
   </details>
 
   <div class="panel">
+    <button @click="validateFeed">Validate</button>
+    <span v-if="store.reportStale" class="hint">edited since — revalidate</span>
+    <div v-if="noticeGroups.length" id="notices">
+      <div v-for="group in noticeGroups" :key="group.code" class="notice">
+        <div class="notice-head" :class="group.severity.toLowerCase()"
+             @click="toggleGroup(group.code)">
+          {{ group.severity }} · {{ group.code }} × {{ group.count }}
+        </div>
+        <ol v-if="expandedCode === group.code">
+          <li v-for="(context, index) in group.contexts" :key="index"
+              @click="highlightContext(context)" class="context">
+            {{ describeContext(context) }}
+          </li>
+        </ol>
+      </div>
+      <button v-if="store.highlightActive" @click="clearHighlight">
+        Clear highlight
+      </button>
+    </div>
+    <div v-else-if="store.report" class="hint">no notices</div>
+  </div>
+
+  <div class="panel">
     <button class="primary" @click="saveFeed">Save &amp; validate</button>
     <div id="save-result">
       <span v-if="store.saving">saving…</span>

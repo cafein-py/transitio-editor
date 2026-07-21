@@ -25,3 +25,11 @@ input, select { padding: 6px; border: 1px solid #c9c5bb; border-radius: 5px; }
 #inspector label { display: block; margin-top: 6px; font-size: 12px; color: #555; }
 [v-cloak] { display: none; }
 input.offset { width: 70px; }
+#notices { margin-top: 8px; max-height: 220px; overflow-y: auto; font-size: 12px; }
+.notice-head { cursor: pointer; padding: 2px 4px; border-radius: 4px; }
+.notice-head.error { color: #a33; }
+.notice-head.warning { color: #8a6d00; }
+.notice-head.info { color: #555; }
+.notice ol { margin: 2px 0; padding-left: 18px; }
+.context { cursor: pointer; }
+.context:hover { text-decoration: underline; }
