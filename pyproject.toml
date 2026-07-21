@@ -33,6 +33,7 @@ classifiers = [
 
 [project.optional-dependencies]
 snap = ["transitio[snap]"]
+notebook = ["ipyleaflet>=0.18", "ipython"]
 
 [project.scripts]
 transitio-editor = "transitio_editor.cli:main"
