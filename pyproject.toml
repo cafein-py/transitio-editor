@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "transitio-editor"
+version = "0.1.0"
+description = "Local map GUI for editing and building GTFS feeds with transitio"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Henrikki Tenkanen" }]
+requires-python = ">=3.10"
+dependencies = [
+    # fastapi >= 0.115 pins a starlette whose trusted-host middleware
+    # matches bracketed IPv6 hosts correctly.
+    "fastapi>=0.115",
+    # the editor uses transitio.edit, which first ships in core 0.2.
+    "transitio>=0.2",
+    "uvicorn>=0.29",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: GIS",
+]
+
+[project.optional-dependencies]
+snap = ["transitio[snap]"]
+
+[project.scripts]
+transitio-editor = "transitio_editor.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/cafein-py/transitio-editor"
+Repository = "https://github.com/cafein-py/transitio-editor"
+Changelog = "https://github.com/cafein-py/transitio-editor/blob/main/CHANGELOG.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["transitio_editor"]
