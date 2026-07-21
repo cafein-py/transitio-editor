@@ -15,6 +15,11 @@ const store = Vue.reactive({
   tripPicking: false,
   saving: false,
   saveResult: null, // { clean, message }
+  routes: [],
+  timetableRoute: "",
+  routeTrips: [],
+  trip: null, // { trip_id, times: [...] }
+  shiftSeconds: 600,
   report: null, // last validation report
   reportStale: false, // edits happened after the last validation
   highlightActive: false,
@@ -133,6 +138,9 @@ async function refreshLayers(fit) {
 }
 
 async function refreshAll(fit) {
+  // Every mutation path funnels through here, so the last validation
+  // report is marked stale even for unwrapped actions (map clicks).
+  if (store.report) store.reportStale = true;
   await refreshSummary();
   await refreshLayers(fit);
 }
@@ -442,6 +450,74 @@ Vue.createApp({
       }
     };
 
+    const onTimetableToggle = async (open) => {
+      if (!open) return;
+      try {
+        store.routes = (await api("GET", "/api/routes")).routes;
+      } catch (error) {
+        store.status = error.message;
+      }
+    };
+
+    const loadTrips = async () => {
+      store.trip = null;
+      try {
+        const route = encodeURIComponent(store.timetableRoute);
+        store.routeTrips = (
+          await api("GET", `/api/routes/${route}/trips`)
+        ).trips;
+      } catch (error) {
+        store.status = error.message;
+      }
+    };
+
+    const loadTrip = async (tripId) => {
+      try {
+        const body = await api(
+          "GET",
+          `/api/trips/${encodeURIComponent(tripId)}/times`,
+        );
+        store.trip = body;
+      } catch (error) {
+        store.status = error.message;
+      }
+    };
+
+    const applyTripTimes = wrap(async () => {
+      const updates = {};
+      for (const row of store.trip.times) {
+        updates[row.stop_sequence] = {
+          arrival_time: row.arrival_time,
+          departure_time: row.departure_time,
+        };
+      }
+      await api(
+        "PUT",
+        `/api/trips/${encodeURIComponent(store.trip.trip_id)}/times`,
+        { times: updates },
+      );
+      await loadTrip(store.trip.trip_id);
+    });
+
+    const deleteTrip = wrap(async () => {
+      await api(
+        "DELETE",
+        `/api/trips/${encodeURIComponent(store.trip.trip_id)}`,
+      );
+      store.trip = null;
+      await loadTrips();
+      await refreshAll(false);
+    });
+
+    const shiftTrip = wrap(async () => {
+      await api(
+        "POST",
+        `/api/trips/${encodeURIComponent(store.trip.trip_id)}/shift`,
+        { seconds: store.shiftSeconds },
+      );
+      await loadTrip(store.trip.trip_id);
+    });
+
     const saveFeed = async () => {
       store.saving = true;
       store.saveResult = null;
@@ -478,6 +554,12 @@ Vue.createApp({
       highlightContext,
       clearHighlight,
       validateFeed,
+      onTimetableToggle,
+      loadTrips,
+      loadTrip,
+      applyTripTimes,
+      deleteTrip,
+      shiftTrip,
       setMode,
       cancelShape,
       finishShape,

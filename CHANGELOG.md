@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- Timetable editing: a sidebar panel lists a route's trips (first
+  departures, directions, frequency windows) and opens any trip as an
+  editable stop-times table — apply changed arrival/departure times
+  (strictly parsed), shift the whole trip by seconds, or delete the
+  trip with its stop_times and frequencies. Backed by new trip-level
+  endpoints (``GET /api/routes``, ``GET /api/routes/{id}/trips``,
+  ``GET``/``PUT /api/trips/{id}/times``, ``DELETE /api/trips/{id}``).
+
 ## 0.1.0 — 2026-07-21
 
 ### Added
