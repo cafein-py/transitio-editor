@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to tram rails instead of only the driving network. Requires
   ``transitio >= 0.3``.
 
+- Jupyter helpers (``transitio_editor.notebook``, extra
+  ``transitio-editor[notebook]``): ``feed_map(feed)`` renders a feed's
+  stops and shapes on an ipyleaflet map for inspection, and
+  ``serve(feed)`` runs the full editor in a background thread and embeds
+  it as an IFrame — both accept a ``FeedEditor``/``FeedBuilder`` or a
+  feed-zip path.
+
 ## 0.2.0 — 2026-07-21
 
 ### Added
