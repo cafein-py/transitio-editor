@@ -83,6 +83,54 @@ def test_feed_map_without_ipyleaflet(tmp_path, monkeypatch):
         feed_map(build(tmp_path))
 
 
+def test_center_handles_antimeridian():
+    geojson = {
+        "stops": {
+            "type": "FeatureCollection",
+            "features": [
+                {"geometry": {"coordinates": [179.9, 60.0]}},
+                {"geometry": {"coordinates": [-179.9, 60.0]}},
+            ],
+        },
+        "shapes": {"type": "FeatureCollection", "features": []},
+    }
+    lat, lon = _center(geojson)
+    assert lat == pytest.approx(60.0)
+    assert abs(lon) == pytest.approx(180.0, abs=0.2)  # near ±180, not 0
+
+
+def test_json_safe_values():
+    import numpy as np
+    import pandas as pd
+
+    from transitio_editor.notebook import _json_safe
+
+    assert _json_safe("x") == "x"
+    assert _json_safe(None) is None
+    assert _json_safe(pd.NA) is None
+    assert _json_safe(float("inf")) is None
+    assert _json_safe(np.int64(5)) == 5
+    assert isinstance(_json_safe(np.int64(5)), int)
+
+
+def test_serve_raises_when_server_does_not_start(tmp_path, monkeypatch):
+    pytest.importorskip("IPython")
+    import uvicorn
+
+    class DeadServer:
+        def __init__(self, config):
+            self.started = False
+
+        def run(self):  # exits immediately without binding
+            pass
+
+    monkeypatch.setattr(uvicorn, "Server", DeadServer)
+    source = tmp_path / "feed.zip"
+    build(tmp_path).save(source, reference_date="20260601")
+    with pytest.raises(RuntimeError, match="failed to start"):
+        serve(FeedEditor(source), port=8413)
+
+
 def test_serve_returns_iframe(tmp_path, monkeypatch):
     pytest.importorskip("IPython")
     import uvicorn

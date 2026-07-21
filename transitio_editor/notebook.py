@@ -10,6 +10,36 @@ Install the extra: ``pip install transitio-editor[notebook]``.
 
 from __future__ import annotations
 
+import math
+
+
+def _json_safe(value):
+    """Coerce a table value to a JSON/GeoJSON-safe scalar.
+
+    Strings/bools/None pass through; numpy scalars unwrap; ``pd.NA`` and
+    non-finite floats become ``None``; anything else is stringified.
+    """
+    if value is None or isinstance(value, (str, bool)):
+        return value
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    try:
+        import pandas as pd
+
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError, ImportError):
+        pass
+    unwrap = getattr(value, "item", None)  # numpy scalar
+    if callable(unwrap):
+        try:
+            return _json_safe(unwrap())
+        except (TypeError, ValueError):
+            pass
+    return str(value)
+
 
 def _as_editor(feed):
     if hasattr(feed, "tables"):
@@ -37,7 +67,9 @@ def _feed_geojson(editor):
                     "type": "Feature",
                     "geometry": geometry.__geo_interface__,
                     "properties": {
-                        key: value for key, value in row.items() if key != name_column
+                        key: _json_safe(value)
+                        for key, value in row.items()
+                        if key != name_column
                     },
                 }
             )
@@ -62,8 +94,12 @@ def _feed_geojson(editor):
 
 
 def _center(geojson, fallback=(0.0, 0.0)):
-    """Mean (lat, lon) over every feature coordinate, for the map center."""
-    lats, lons = [], []
+    """Map center (lat, lon) over every feature coordinate.
+
+    Longitude uses a circular mean so a feed spanning the antimeridian
+    centers correctly instead of jumping to the opposite meridian.
+    """
+    lats, sin_lon, cos_lon = [], [], []
 
     def walk(coordinates):
         if (
@@ -71,8 +107,10 @@ def _center(geojson, fallback=(0.0, 0.0)):
             and isinstance(coordinates[0], (int, float))
             and isinstance(coordinates[1], (int, float))
         ):
-            lons.append(coordinates[0])
-            lats.append(coordinates[1])
+            lon, lat = coordinates
+            lats.append(lat)
+            sin_lon.append(math.sin(math.radians(lon)))
+            cos_lon.append(math.cos(math.radians(lon)))
         else:
             for part in coordinates:
                 walk(part)
@@ -82,7 +120,11 @@ def _center(geojson, fallback=(0.0, 0.0)):
             walk(feature["geometry"]["coordinates"])
     if not lats:
         return fallback
-    return (sum(lats) / len(lats), sum(lons) / len(lons))
+    lat = sum(lats) / len(lats)
+    lon = math.degrees(
+        math.atan2(sum(sin_lon) / len(sin_lon), sum(cos_lon) / len(cos_lon))
+    )
+    return (lat, lon)
 
 
 def feed_map(feed, *, zoom=12):
@@ -176,7 +218,12 @@ def serve(feed, *, port=8300, osm_pbf=None, height=600, **create_app_kwargs):
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     for _ in range(50):  # wait up to ~5 s for the server to bind
-        if server.started:
+        if server.started or not thread.is_alive():
             break
         time.sleep(0.1)
+    if not server.started:
+        raise RuntimeError(
+            f"editor server failed to start on 127.0.0.1:{port} "
+            "(is the port already in use? pass port=)"
+        )
     return IFrame(f"http://127.0.0.1:{port}", width="100%", height=height)
