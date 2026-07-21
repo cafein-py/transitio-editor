@@ -331,19 +331,20 @@ def test_host_header_guard_and_zip_target(editor, tmp_path):
 
 
 def test_ui_and_static_assets_served(editor):
+    import re
+
     client = TestClient(create_app(editor))
     index = client.get("/")
     assert index.status_code == 200
-    assert "maplibre-gl.js" in index.text
-    assert "app.js" in index.text
-    assert "vue.global.prod.js" in index.text
-    for asset in (
-        "/static/app.js",
-        "/static/style.css",
-        "/static/vendor/maplibre-gl.js",
-        "/static/vendor/maplibre-gl.css",
-        "/static/vendor/vue.global.prod.js",
-    ):
+    assert '<div id="app">' in index.text
+
+    # The built index references hashed JS/CSS bundles under /static/;
+    # every referenced asset must serve.
+    assets = re.findall(r'(?:src|href)="(/static/assets/[^"]+)"', index.text)
+    assert assets, "built index has no /static/assets references"
+    assert any(a.endswith(".js") for a in assets)
+    assert any(a.endswith(".css") for a in assets)
+    for asset in assets:
         assert client.get(asset).status_code == 200
 
     summary = client.get("/api/feed").json()

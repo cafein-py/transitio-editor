@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+- The frontend is now a Vite + single-file-component Vue application
+  (`frontend/`), replacing the previous hand-written single-file
+  `app.js` and inline template. The UI is split into an API client, a
+  MapLibre bridge, a reactive store, shared actions and one component
+  per sidebar panel. MapLibre and Vue are npm dependencies bundled by
+  the build (no vendored blobs). Built assets are committed under
+  `transitio_editor/static/` so the wheel needs no Node; edit the source
+  under `frontend/src/` and rebuild with `npm --prefix frontend run
+  build`. No user-facing behavior change.
+
 ## 0.3.0 — 2026-07-21
 
 ### Added

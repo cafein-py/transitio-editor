@@ -30,6 +30,19 @@ pip install transitio-editor          # the editor
 pip install "transitio-editor[snap]"  # + street snapping (networkx)
 ```
 
+## Developing the frontend
+
+The editor UI is a Vite + Vue single-file-component app under
+`frontend/`. The built assets are committed under
+`transitio_editor/static/`, so installing the package needs no Node —
+only editing the UI does:
+
+```
+cd frontend
+npm install
+npm run build     # rebuilds transitio_editor/static/
+```
+
 ## License
 
 MIT. Map data © OpenStreetMap contributors.
