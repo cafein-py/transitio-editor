@@ -15,3 +15,7 @@ CLAUDE.md
 .vscode/
 .idea/
 .DS_Store
+
+# Frontend build toolchain
+frontend/node_modules/
+frontend/.vite/

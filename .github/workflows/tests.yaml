@@ -17,6 +17,21 @@ jobs:
       - run: black --check transitio_editor tests
       - run: flake8 transitio_editor tests
 
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+        working-directory: frontend
+      # The built assets under transitio_editor/static are committed (so
+      # the wheel needs no Node); this rebuilds from source to confirm it
+      # still compiles.
+      - run: npm run build
+        working-directory: frontend
+
   test:
     runs-on: ${{ matrix.os }}
     strategy:
