@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+
+- The frontend is now a Vue application (vendored ``vue.global.prod.js``,
+  no build step, no CDN): the sidebar, forms, inspector and status
+  surfaces render declaratively from a reactive store, with Vue's
+  interpolation escaping all feed-derived values; MapLibre stays
+  imperative behind a small bridge. Behavior is unchanged; trip-stop
+  picking now activates precisely while the trip form is open.
+
 ### Added
 
 - First standalone release of the editor, split out of the transitio core

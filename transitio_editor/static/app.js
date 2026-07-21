@@ -1,16 +1,47 @@
-/* transitio editor frontend: a thin client over the /api endpoints. */
+/* transitio editor frontend: a Vue app over the /api endpoints, with
+   MapLibre kept imperative behind a small bridge. Vue interpolation
+   escapes all feed-derived values. */
 "use strict";
 
-const esc = (value) =>
-  String(value ?? "").replace(
-    /[&<>"']/g,
-    (c) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
-  );
+const store = Vue.reactive({
+  source: null,
+  tables: {},
+  snapAvailable: false,
+  mode: "select",
+  snapOn: true,
+  inspector: null, // { stopId, name }
+  movingStop: null,
+  tripStops: [], // [{ stopId, offset }]
+  tripPicking: false,
+  saving: false,
+  saveResult: null, // { clean, message }
+  status: "",
+});
 
-const status = (message) => {
-  document.getElementById("status").textContent = message || "";
-};
+const forms = Vue.reactive({
+  route: { route_id: "", route_short_name: "", route_type: 3, agency_id: "" },
+  trip: {
+    route_id: "",
+    service_id: "",
+    trip_id: "",
+    shape_id: "",
+    start: "06:00:00",
+    end: "22:00:00",
+    headway: 600,
+  },
+  agency: {
+    agency_id: "",
+    agency_name: "",
+    agency_url: "",
+    agency_timezone: "",
+  },
+  service: {
+    service_id: "",
+    days: "weekdays",
+    start_date: "20260101",
+    end_date: "20261231",
+  },
+});
 
 async function api(method, path, body) {
   const options = { method, headers: {} };
@@ -31,6 +62,8 @@ async function api(method, path, body) {
   return response.json();
 }
 
+/* ---------------- map bridge (imperative MapLibre) ---------------- */
+
 const map = new maplibregl.Map({
   container: "map",
   style: {
@@ -50,38 +83,9 @@ const map = new maplibregl.Map({
 });
 map.addControl(new maplibregl.NavigationControl());
 
-let mode = "select";
-let snapAvailable = false;
 let drawnPoints = []; // [lat, lon]
-let previewCoords = []; // [lon, lat] for the preview line
-let movingStop = null;
-const tripStops = [];
-
-function setMode(next) {
-  mode = next;
-  for (const id of ["select", "add-stop", "draw"]) {
-    document
-      .getElementById(`mode-${id}`)
-      .classList.toggle("active", `mode-${id}` === `mode-${next}`);
-  }
-  document
-    .getElementById("draw-actions")
-    .classList.toggle("hidden", next !== "draw");
-  document
-    .getElementById("snap-row")
-    .classList.toggle("hidden", next !== "draw" || !snapAvailable);
-  if (next !== "draw") resetDraw();
-  map.getCanvas().style.cursor = next === "select" ? "" : "crosshair";
-}
-document.getElementById("mode-select").onclick = () => setMode("select");
-document.getElementById("mode-add-stop").onclick = () => setMode("add-stop");
-document.getElementById("mode-draw").onclick = () => setMode("draw");
-
-function resetDraw() {
-  drawnPoints = [];
-  previewCoords = [];
-  renderPreview();
-}
+let previewCoords = []; // [lon, lat]
+let drawSequence = 0; // discards out-of-order snap responses
 
 function renderPreview() {
   const source = map.getSource("preview");
@@ -93,14 +97,17 @@ function renderPreview() {
   }
 }
 
+function resetDraw() {
+  drawnPoints = [];
+  previewCoords = [];
+  renderPreview();
+}
+
 async function refreshSummary() {
   const summary = await api("GET", "/api/feed");
-  snapAvailable = Boolean(summary.snapAvailable);
-  const rows = Object.entries(summary.tables)
-    .map(([name, count]) => `<tr><td>${esc(name)}</td><td>${esc(count)}</td></tr>`)
-    .join("");
-  document.getElementById("summary").innerHTML =
-    `<div>${esc(summary.source || "new feed")}</div><table>${rows}</table>`;
+  store.source = summary.source;
+  store.tables = summary.tables;
+  store.snapAvailable = Boolean(summary.snapAvailable);
 }
 
 async function refreshLayers(fit) {
@@ -119,54 +126,26 @@ async function refreshLayers(fit) {
   }
 }
 
-function inspectStop(properties) {
-  const inspector = document.getElementById("inspector");
-  inspector.classList.remove("hidden");
-  // Feed fields are untrusted; build the panel through the DOM, never
-  // through markup interpolation.
-  inspector.replaceChildren();
-  const title = document.createElement("b");
-  title.textContent = `stop ${properties.stop_id}`;
-  const label = document.createElement("label");
-  label.textContent = "name ";
-  const nameInput = document.createElement("input");
-  nameInput.id = "inspect-name";
-  nameInput.value = properties.stop_name || "";
-  label.append(nameInput);
-  const saveButton = document.createElement("button");
-  saveButton.id = "inspect-save";
-  saveButton.textContent = "Update";
-  const moveButton = document.createElement("button");
-  moveButton.id = "inspect-move";
-  moveButton.textContent = "Move (click map)";
-  inspector.append(title, label, saveButton, moveButton);
-  document.getElementById("inspect-save").onclick = async () => {
-    await api("PATCH", `/api/stops/${encodeURIComponent(properties.stop_id)}`, {
-      stop_name: document.getElementById("inspect-name").value,
-    });
-    await refreshAll(false);
-  };
-  document.getElementById("inspect-move").onclick = () => {
-    movingStop = properties.stop_id;
-    map.getCanvas().style.cursor = "crosshair";
-    status(`click the new location of ${movingStop}`);
-  };
+async function refreshAll(fit) {
+  await refreshSummary();
+  await refreshLayers(fit);
 }
 
 async function handleMapClick(event) {
   const { lng, lat } = event.lngLat;
   try {
-    if (movingStop) {
-      await api("PATCH", `/api/stops/${encodeURIComponent(movingStop)}`, {
-        stop_lat: lat,
-        stop_lon: lng,
-      });
-      movingStop = null;
-      status("");
+    if (store.movingStop) {
+      await api(
+        "PATCH",
+        `/api/stops/${encodeURIComponent(store.movingStop)}`,
+        { stop_lat: lat, stop_lon: lng },
+      );
+      store.movingStop = null;
+      store.status = "";
       await refreshAll(false);
       return;
     }
-    if (mode === "add-stop") {
+    if (store.mode === "add-stop") {
       const stopId = prompt("stop_id?");
       if (!stopId) return;
       const name = prompt("stop name?", stopId) || stopId;
@@ -179,14 +158,14 @@ async function handleMapClick(event) {
       await refreshAll(false);
       return;
     }
-    if (mode === "draw") {
+    if (store.mode === "draw") {
       drawnPoints.push([lat, lng]);
-      const snapOn =
-        snapAvailable && document.getElementById("snap-toggle").checked;
-      if (snapOn && drawnPoints.length >= 2) {
+      if (store.snapAvailable && store.snapOn && drawnPoints.length >= 2) {
+        const sequence = ++drawSequence;
         const feature = await api("POST", "/api/shapes/snap", {
-          waypoints: drawnPoints,
+          waypoints: [...drawnPoints],
         });
+        if (sequence !== drawSequence) return; // superseded by a newer click
         previewCoords = feature.geometry.coordinates;
       } else {
         previewCoords = drawnPoints.map(([a, b]) => [b, a]);
@@ -194,108 +173,9 @@ async function handleMapClick(event) {
       renderPreview();
     }
   } catch (error) {
-    status(error.message);
+    store.status = error.message;
   }
 }
-
-async function finishShape() {
-  if (previewCoords.length < 2) {
-    status("draw at least two points first");
-    return;
-  }
-  const shapeId = prompt("shape_id?");
-  if (!shapeId) return;
-  try {
-    await api("POST", "/api/shapes", {
-      shape_id: shapeId,
-      points: previewCoords.map(([lon, lat]) => [lat, lon]),
-    });
-    resetDraw();
-    setMode("select");
-    await refreshAll(false);
-  } catch (error) {
-    status(error.message);
-  }
-}
-document.getElementById("finish-shape").onclick = finishShape;
-document.getElementById("cancel-shape").onclick = () => {
-  resetDraw();
-  setMode("select");
-};
-
-function wireForm(id, path, transform) {
-  document.getElementById(id).onsubmit = async (event) => {
-    event.preventDefault();
-    const data = Object.fromEntries(new FormData(event.target).entries());
-    try {
-      await api("POST", path, transform ? transform(data) : data);
-      event.target.reset();
-      status("");
-      await refreshAll(false);
-    } catch (error) {
-      status(error.message);
-    }
-  };
-}
-wireForm("agency-form", "/api/agencies");
-wireForm("service-form", "/api/services");
-wireForm("route-form", "/api/routes", (data) => ({
-  ...data,
-  route_type: Number(data.route_type),
-  agency_id: data.agency_id || null,
-}));
-wireForm("trip-form", "/api/trips/frequency", (data) => ({
-  ...data,
-  headway: Number(data.headway),
-  shape_id: data.shape_id || null,
-  stops: tripStops.map((entry) => [entry.stopId, entry.offset]),
-}));
-document.getElementById("clear-trip-stops").onclick = () => {
-  tripStops.length = 0;
-  renderTripStops();
-};
-
-function renderTripStops() {
-  const list = document.getElementById("trip-stops");
-  list.replaceChildren();
-  tripStops.forEach((entry, index) => {
-    const item = document.createElement("li");
-    item.textContent = `${entry.stopId} +`;
-    const offset = document.createElement("input");
-    offset.type = "number";
-    offset.value = entry.offset;
-    offset.style.width = "70px";
-    offset.onchange = () => {
-      tripStops[index].offset = Number(offset.value) || 0;
-    };
-    item.append(offset, "s");
-    list.append(item);
-  });
-}
-
-document.getElementById("save").onclick = async () => {
-  const result = document.getElementById("save-result");
-  result.textContent = "saving…";
-  try {
-    const saved = await api("POST", "/api/save", {});
-    const counts = saved.report.notices.reduce((acc, notice) => {
-      acc[notice.severity] = (acc[notice.severity] || 0) + 1;
-      return acc;
-    }, {});
-    const outcome = document.createElement("span");
-    outcome.className = saved.clean ? "clean" : "dirty";
-    outcome.textContent = saved.clean
-      ? "saved — no errors"
-      : `saved with ${counts.ERROR || 0} errors, ${counts.WARNING || 0} warnings`;
-    result.replaceChildren(outcome);
-    await refreshSummary();
-  } catch (error) {
-    const outcome = document.createElement("span");
-    outcome.className = "dirty";
-    outcome.textContent = error.message;
-    result.replaceChildren(outcome);
-  }
-};
 
 map.on("load", async () => {
   map.addSource("stops", {
@@ -339,21 +219,20 @@ map.on("load", async () => {
   });
 
   map.on("click", "stops", (event) => {
-    if (movingStop) return; // fall through to the map handler
+    if (store.movingStop || store.mode !== "select") return;
     const properties = event.features[0].properties;
-    if (mode === "select") {
-      const open = document.querySelector("#trip-form");
-      if (open && open.closest("details").open) {
-        tripStops.push({
-          stopId: properties.stop_id,
-          offset: tripStops.length * 120,
-        });
-        renderTripStops();
-      } else {
-        inspectStop(properties);
-      }
-      event.preventDefault();
+    if (store.tripPicking) {
+      store.tripStops.push({
+        stopId: properties.stop_id,
+        offset: store.tripStops.length * 120,
+      });
+    } else {
+      store.inspector = {
+        stopId: properties.stop_id,
+        name: properties.stop_name || "",
+      };
     }
+    event.preventDefault();
   });
   map.on("click", (event) => {
     if (event.defaultPrevented) return;
@@ -361,14 +240,135 @@ map.on("load", async () => {
   });
 
   try {
-    await refreshSummary();
-    await refreshLayers(true);
+    await refreshAll(true);
   } catch (error) {
-    status(error.message);
+    store.status = error.message;
   }
 });
 
-async function refreshAll(fit) {
-  await refreshSummary();
-  await refreshLayers(fit);
+/* ---------------- the Vue application ---------------- */
+
+function wrap(action) {
+  return async (...args) => {
+    try {
+      await action(...args);
+      store.status = "";
+    } catch (error) {
+      store.status = error.message;
+    }
+  };
 }
+
+Vue.createApp({
+  setup() {
+    const setMode = (mode) => {
+      store.mode = mode;
+      if (mode !== "draw") resetDraw();
+      map.getCanvas().style.cursor = mode === "select" ? "" : "crosshair";
+    };
+
+    const cancelShape = () => {
+      resetDraw();
+      setMode("select");
+    };
+
+    const finishShape = wrap(async () => {
+      if (previewCoords.length < 2) {
+        throw new Error("draw at least two points first");
+      }
+      const shapeId = prompt("shape_id?");
+      if (!shapeId) return;
+      await api("POST", "/api/shapes", {
+        shape_id: shapeId,
+        points: previewCoords.map(([lon, lat]) => [lat, lon]),
+      });
+      cancelShape();
+      await refreshAll(false);
+    });
+
+    const updateInspectedStop = wrap(async () => {
+      await api(
+        "PATCH",
+        `/api/stops/${encodeURIComponent(store.inspector.stopId)}`,
+        { stop_name: store.inspector.name },
+      );
+      await refreshAll(false);
+    });
+
+    const startMovingStop = () => {
+      store.movingStop = store.inspector.stopId;
+      store.status = `click the new location of ${store.movingStop}`;
+      map.getCanvas().style.cursor = "crosshair";
+    };
+
+    const submitRoute = wrap(async () => {
+      await api("POST", "/api/routes", {
+        ...forms.route,
+        agency_id: forms.route.agency_id || null,
+      });
+      forms.route.route_id = "";
+      forms.route.route_short_name = "";
+      await refreshAll(false);
+    });
+
+    const submitTrip = wrap(async () => {
+      await api("POST", "/api/trips/frequency", {
+        ...forms.trip,
+        shape_id: forms.trip.shape_id || null,
+        stops: store.tripStops.map((entry) => [entry.stopId, entry.offset]),
+      });
+      store.tripStops.length = 0;
+      forms.trip.trip_id = "";
+      await refreshAll(false);
+    });
+
+    const submitAgency = wrap(async () => {
+      await api("POST", "/api/agencies", { ...forms.agency });
+      await refreshAll(false);
+    });
+
+    const submitService = wrap(async () => {
+      await api("POST", "/api/services", { ...forms.service });
+      await refreshAll(false);
+    });
+
+    const saveFeed = async () => {
+      store.saving = true;
+      store.saveResult = null;
+      try {
+        const saved = await api("POST", "/api/save", {});
+        const counts = saved.report.notices.reduce((acc, notice) => {
+          acc[notice.severity] = (acc[notice.severity] || 0) + 1;
+          return acc;
+        }, {});
+        store.saveResult = {
+          clean: saved.clean,
+          message: saved.clean
+            ? "saved — no errors"
+            : `saved with ${counts.ERROR || 0} errors, ` +
+              `${counts.WARNING || 0} warnings`,
+        };
+        await refreshSummary();
+      } catch (error) {
+        store.saveResult = { clean: false, message: error.message };
+      } finally {
+        store.saving = false;
+      }
+    };
+
+    return {
+      store,
+      forms,
+      setMode,
+      cancelShape,
+      finishShape,
+      updateInspectedStop,
+      startMovingStop,
+      submitRoute,
+      submitTrip,
+      submitAgency,
+      submitService,
+      saveFeed,
+    };
+  },
+}).mount("#sidebar");
