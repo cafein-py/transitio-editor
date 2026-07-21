@@ -22,6 +22,12 @@ def main(argv=None):
         default="driving",
         help="pyrosm network type for snapping (default: driving)",
     )
+    parser.add_argument(
+        "--snap-filter",
+        metavar="JSON",
+        help='default pyrosm tag filter for snapping, e.g. \'{"railway": '
+        '["tram"]}\' to snap to tram rails (overrides --network-type)',
+    )
     parser.add_argument("--host", default="127.0.0.1", help="bind address")
     parser.add_argument("--port", type=int, default=8300, help="port")
     parser.add_argument(
@@ -44,6 +50,16 @@ def main(argv=None):
             "the editor has no authentication; refusing a non-loopback "
             "host without --allow-remote"
         )
+    snap_filter = None
+    if args.snap_filter:
+        import json
+
+        try:
+            snap_filter = json.loads(args.snap_filter)
+        except json.JSONDecodeError as error:
+            parser.error(f"--snap-filter is not valid JSON: {error}")
+        if not isinstance(snap_filter, dict):
+            parser.error("--snap-filter must be a JSON object")
     editor = FeedEditor(args.feed)
     # Host-header pinning stays on in remote mode: only the address the
     # server was bound under is accepted, not arbitrary rebindable names.
@@ -57,6 +73,7 @@ def main(argv=None):
         editor,
         osm_pbf=args.osm_pbf,
         network_type=args.network_type,
+        snap_custom_filter=snap_filter,
         allowed_hosts=allowed,
     )
     print(f"transitio editor on http://{args.host}:{args.port}")

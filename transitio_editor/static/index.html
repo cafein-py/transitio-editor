@@ -29,7 +29,12 @@
               @click="setMode('draw')">Draw shape</button>
     </div>
     <label v-show="store.mode === 'draw' && store.snapAvailable">
-      <input type="checkbox" v-model="store.snapOn"> snap to streets
+      <input type="checkbox" v-model="store.snapOn"> snap to
+      <select v-model="store.snapNetwork">
+        <option value="streets">streets</option>
+        <option value="tram">tram rails</option>
+        <option value="rail">rail</option>
+      </select>
     </label>
     <div v-show="store.mode === 'draw'">
       <button @click="finishShape">Finish shape</button>
