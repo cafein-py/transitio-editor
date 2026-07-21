@@ -266,11 +266,13 @@ def test_ui_and_static_assets_served(editor):
     assert index.status_code == 200
     assert "maplibre-gl.js" in index.text
     assert "app.js" in index.text
+    assert "vue.global.prod.js" in index.text
     for asset in (
         "/static/app.js",
         "/static/style.css",
         "/static/vendor/maplibre-gl.js",
         "/static/vendor/maplibre-gl.css",
+        "/static/vendor/vue.global.prod.js",
     ):
         assert client.get(asset).status_code == 200
 

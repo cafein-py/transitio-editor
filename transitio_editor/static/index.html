@@ -8,84 +8,112 @@
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<div id="sidebar">
+<div id="sidebar" v-cloak>
   <h1>transitio</h1>
-  <div id="summary" class="panel"></div>
+  <div class="panel">
+    <div>{{ store.source || "new feed" }}</div>
+    <table>
+      <tr v-for="(count, name) in store.tables" :key="name">
+        <td>{{ name }}</td><td>{{ count }}</td>
+      </tr>
+    </table>
+  </div>
 
   <div class="panel">
     <div class="mode-row">
-      <button id="mode-select" class="mode active">Select</button>
-      <button id="mode-add-stop" class="mode">Add stop</button>
-      <button id="mode-draw" class="mode">Draw shape</button>
+      <button class="mode" :class="{ active: store.mode === 'select' }"
+              @click="setMode('select')">Select</button>
+      <button class="mode" :class="{ active: store.mode === 'add-stop' }"
+              @click="setMode('add-stop')">Add stop</button>
+      <button class="mode" :class="{ active: store.mode === 'draw' }"
+              @click="setMode('draw')">Draw shape</button>
     </div>
-    <label id="snap-row" class="hidden">
-      <input type="checkbox" id="snap-toggle" checked> snap to streets
+    <label v-show="store.mode === 'draw' && store.snapAvailable">
+      <input type="checkbox" v-model="store.snapOn"> snap to streets
     </label>
-    <div id="draw-actions" class="hidden">
-      <button id="finish-shape">Finish shape</button>
-      <button id="cancel-shape">Cancel</button>
+    <div v-show="store.mode === 'draw'">
+      <button @click="finishShape">Finish shape</button>
+      <button @click="cancelShape">Cancel</button>
     </div>
   </div>
 
-  <div id="inspector" class="panel hidden"></div>
+  <div class="panel" v-if="store.inspector">
+    <b>stop {{ store.inspector.stopId }}</b>
+    <label>name <input v-model="store.inspector.name"></label>
+    <button @click="updateInspectedStop">Update</button>
+    <button @click="startMovingStop">Move (click map)</button>
+  </div>
 
   <details class="panel"><summary>New route</summary>
-    <form id="route-form">
-      <input name="route_id" placeholder="route_id" required>
-      <input name="route_short_name" placeholder="short name" required>
-      <select name="route_type">
+    <form @submit.prevent="submitRoute">
+      <input v-model="forms.route.route_id" placeholder="route_id" required>
+      <input v-model="forms.route.route_short_name" placeholder="short name" required>
+      <select v-model.number="forms.route.route_type">
         <option value="0">tram</option><option value="1">subway</option>
-        <option value="2">rail</option><option value="3" selected>bus</option>
+        <option value="2">rail</option><option value="3">bus</option>
         <option value="4">ferry</option>
       </select>
-      <input name="agency_id" placeholder="agency_id (optional)">
+      <input v-model="forms.route.agency_id" placeholder="agency_id (optional)">
       <button>Add route</button>
     </form>
   </details>
 
-  <details class="panel"><summary>New frequency trip</summary>
-    <form id="trip-form">
-      <input name="route_id" placeholder="route_id" required>
-      <input name="service_id" placeholder="service_id" required>
-      <input name="trip_id" placeholder="trip_id" required>
-      <input name="shape_id" placeholder="shape_id (optional)">
-      <input name="start" value="06:00:00" required>
-      <input name="end" value="22:00:00" required>
-      <input name="headway" type="number" value="600" required>
+  <details class="panel" @toggle="store.tripPicking = $event.target.open">
+    <summary>New frequency trip</summary>
+    <form @submit.prevent="submitTrip">
+      <input v-model="forms.trip.route_id" placeholder="route_id" required>
+      <input v-model="forms.trip.service_id" placeholder="service_id" required>
+      <input v-model="forms.trip.trip_id" placeholder="trip_id" required>
+      <input v-model="forms.trip.shape_id" placeholder="shape_id (optional)">
+      <input v-model="forms.trip.start" required>
+      <input v-model="forms.trip.end" required>
+      <input v-model.number="forms.trip.headway" type="number" required>
       <p class="hint">Click stops on the map in visit order:</p>
-      <ol id="trip-stops"></ol>
-      <button type="button" id="clear-trip-stops">Clear stops</button>
+      <ol>
+        <li v-for="(entry, index) in store.tripStops" :key="index">
+          {{ entry.stopId }} +
+          <input v-model.number="entry.offset" type="number" class="offset">s
+        </li>
+      </ol>
+      <button type="button" @click="store.tripStops.length = 0">Clear stops</button>
       <button>Add trip</button>
     </form>
   </details>
 
   <details class="panel"><summary>New agency / service</summary>
-    <form id="agency-form">
-      <input name="agency_id" placeholder="agency_id" required>
-      <input name="agency_name" placeholder="name" required>
-      <input name="agency_url" placeholder="https://…" required>
-      <input name="agency_timezone" placeholder="Europe/Helsinki" required>
+    <form @submit.prevent="submitAgency">
+      <input v-model="forms.agency.agency_id" placeholder="agency_id" required>
+      <input v-model="forms.agency.agency_name" placeholder="name" required>
+      <input v-model="forms.agency.agency_url" placeholder="https://…" required>
+      <input v-model="forms.agency.agency_timezone" placeholder="Europe/Helsinki" required>
       <button>Add agency</button>
     </form>
-    <form id="service-form">
-      <input name="service_id" placeholder="service_id" required>
-      <select name="days">
+    <form @submit.prevent="submitService">
+      <input v-model="forms.service.service_id" placeholder="service_id" required>
+      <select v-model="forms.service.days">
         <option>daily</option><option>weekdays</option><option>weekend</option>
       </select>
-      <input name="start_date" value="20260101" required>
-      <input name="end_date" value="20261231" required>
+      <input v-model="forms.service.start_date" required>
+      <input v-model="forms.service.end_date" required>
       <button>Add service</button>
     </form>
   </details>
 
   <div class="panel">
-    <button id="save" class="primary">Save &amp; validate</button>
-    <div id="save-result"></div>
+    <button class="primary" @click="saveFeed">Save &amp; validate</button>
+    <div id="save-result">
+      <span v-if="store.saving">saving…</span>
+      <span v-else-if="store.saveResult"
+            :class="store.saveResult.clean ? 'clean' : 'dirty'">
+        {{ store.saveResult.message }}
+      </span>
+    </div>
   </div>
-  <div id="status"></div>
+  <div id="status">{{ store.status }}</div>
 </div>
 <div id="map"></div>
 <script src="/static/vendor/maplibre-gl.js"></script>
+<script src="/static/vendor/vue.global.prod.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>
