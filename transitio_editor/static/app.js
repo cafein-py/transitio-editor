@@ -3,12 +3,21 @@
    escapes all feed-derived values. */
 "use strict";
 
+// pyrosm tag filters behind the snap-network presets; "streets" uses the
+// server's default network (no filter).
+const SNAP_FILTERS = {
+  streets: null,
+  tram: { railway: ["tram"] },
+  rail: { railway: ["rail", "light_rail"] },
+};
+
 const store = Vue.reactive({
   source: null,
   tables: {},
   snapAvailable: false,
   mode: "select",
   snapOn: true,
+  snapNetwork: "streets",
   inspector: null, // { stopId, name }
   movingStop: null,
   tripStops: [], // [{ stopId, offset }]
@@ -176,9 +185,10 @@ async function handleMapClick(event) {
       drawnPoints.push([lat, lng]);
       if (store.snapAvailable && store.snapOn && drawnPoints.length >= 2) {
         const sequence = ++drawSequence;
-        const feature = await api("POST", "/api/shapes/snap", {
-          waypoints: [...drawnPoints],
-        });
+        const request = { waypoints: [...drawnPoints] };
+        const filter = SNAP_FILTERS[store.snapNetwork];
+        if (filter) request.custom_filter = filter;
+        const feature = await api("POST", "/api/shapes/snap", request);
         if (sequence !== drawSequence) return; // superseded by a newer click
         previewCoords = feature.geometry.coordinates;
       } else {

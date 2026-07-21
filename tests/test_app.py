@@ -105,6 +105,62 @@ def test_snap_endpoint_requires_extract(editor):
     assert response.status_code == 409
 
 
+def test_snap_endpoint_forwards_custom_filter(editor, monkeypatch):
+    from shapely.geometry import LineString
+
+    calls = {}
+
+    def fake_snap(waypoints, pbf, **kwargs):
+        calls["waypoints"] = waypoints
+        calls["kwargs"] = kwargs
+        return LineString([(24.9, 60.1), (24.91, 60.11)])
+
+    monkeypatch.setattr("transitio.edit.snap_to_network", fake_snap)
+
+    client = TestClient(create_app(editor, osm_pbf="fake.osm.pbf"))
+    wp = [[60.169, 24.931], [60.171, 24.941]]
+
+    ok = client.post("/api/shapes/snap", json={"waypoints": wp})
+    assert ok.status_code == 200
+    assert ok.json()["geometry"]["type"] == "LineString"
+    assert calls["kwargs"] == {"network_type": "driving"}
+
+    client.post(
+        "/api/shapes/snap",
+        json={"waypoints": wp, "custom_filter": {"railway": ["tram"]}},
+    )
+    assert calls["kwargs"] == {"custom_filter": {"railway": ["tram"]}}
+
+    bad = client.post(
+        "/api/shapes/snap", json={"waypoints": wp, "custom_filter": "tram"}
+    )
+    assert bad.status_code == 422
+
+
+def test_snap_server_default_filter(editor, monkeypatch):
+    from shapely.geometry import LineString
+
+    calls = {}
+
+    def fake_snap(waypoints, pbf, **kwargs):
+        calls.update(kwargs)
+        return LineString([(24.9, 60.1), (24.91, 60.11)])
+
+    monkeypatch.setattr("transitio.edit.snap_to_network", fake_snap)
+    client = TestClient(
+        create_app(
+            editor,
+            osm_pbf="fake.osm.pbf",
+            snap_custom_filter={"railway": ["tram"]},
+        )
+    )
+    client.post(
+        "/api/shapes/snap",
+        json={"waypoints": [[60.169, 24.931], [60.171, 24.941]]},
+    )
+    assert calls == {"custom_filter": {"railway": ["tram"]}}
+
+
 def test_save_reports_unclean_feed(tmp_path):
     builder = FeedBuilder()
     builder.add_agency("a", "A", "https://a.example", "Europe/Helsinki")
@@ -247,6 +303,20 @@ def test_cli_refuses_non_loopback_host(tmp_path):
         archive.writestr("agency.txt", "agency_id\n")
     with pytest.raises(SystemExit):
         main([str(feed), "--host", "0.0.0.0"])
+
+
+def test_cli_rejects_bad_snap_filter(tmp_path):
+    import zipfile as _zipfile
+
+    from transitio_editor.cli import main
+
+    feed = tmp_path / "feed.zip"
+    with _zipfile.ZipFile(feed, "w") as archive:
+        archive.writestr("agency.txt", "agency_id\n")
+    with pytest.raises(SystemExit):
+        main([str(feed), "--snap-filter", "not json"])
+    with pytest.raises(SystemExit):
+        main([str(feed), "--snap-filter", "[1, 2]"])  # not an object
 
 
 def test_host_header_guard_and_zip_target(editor, tmp_path):

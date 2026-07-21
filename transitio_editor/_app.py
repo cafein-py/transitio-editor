@@ -9,7 +9,14 @@ def _geojson_feature(geometry_mapping, properties):
     return {"type": "Feature", "geometry": geometry_mapping, "properties": properties}
 
 
-def create_app(editor, *, osm_pbf=None, network_type="driving", allowed_hosts=None):
+def create_app(
+    editor,
+    *,
+    osm_pbf=None,
+    network_type="driving",
+    snap_custom_filter=None,
+    allowed_hosts=None,
+):
     """Build the FastAPI app serving one :class:`~transitio.FeedEditor`.
 
     The app exposes the feed's tables and geometries, mutation endpoints
@@ -28,6 +35,10 @@ def create_app(editor, *, osm_pbf=None, network_type="driving", allowed_hosts=No
         ``transitio[snap]`` extra).
     network_type : str, default "driving"
         pyrosm network type for snapping.
+    snap_custom_filter : dict, optional
+        Default pyrosm Overpass-style tag filter for snapping (e.g.
+        ``{"railway": ["tram"]}``); a per-request ``custom_filter``
+        overrides it. See :func:`~transitio.edit.snap_to_network`.
     allowed_hosts : list of str, optional
         Accepted ``Host`` header values (DNS-rebinding guard); defaults
         to the loopback names.
@@ -379,10 +390,18 @@ def create_app(editor, *, osm_pbf=None, network_type="driving", allowed_hosts=No
             )
         from transitio.edit import snap_to_network
 
+        custom_filter = payload.get("custom_filter", snap_custom_filter)
+        if custom_filter is not None and not isinstance(custom_filter, dict):
+            raise HTTPException(422, "custom_filter must be an object")
         try:
-            line = snap_to_network(
-                payload["waypoints"], osm_pbf, network_type=network_type
-            )
+            if custom_filter is not None:
+                line = snap_to_network(
+                    payload["waypoints"], osm_pbf, custom_filter=custom_filter
+                )
+            else:
+                line = snap_to_network(
+                    payload["waypoints"], osm_pbf, network_type=network_type
+                )
         except KeyError as error:
             raise HTTPException(422, f"missing field {error}") from None
         except ImportError as error:

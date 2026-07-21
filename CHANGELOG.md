@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- Snap to tram or rail networks: the draw panel's snap control now picks
+  the OSM network — streets, tram rails or rail — and the snapping
+  endpoint accepts a pyrosm ``custom_filter`` (per request, or a server
+  default via the new ``--snap-filter`` CLI option and
+  ``create_app(snap_custom_filter=)``), so route shapes can be snapped
+  to tram rails instead of only the driving network. Requires
+  ``transitio >= 0.3``.
+
 ## 0.2.0 — 2026-07-21
 
 ### Added
