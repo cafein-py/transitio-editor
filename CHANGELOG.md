@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+- Validation-report tab: the sidebar now has Edit and Report tabs; the
+  Report tab investigates the full transitio validation report —
+  severity totals, the computed service window, row counts, and notices
+  grouped by code and severity, each expandable to sample contexts that
+  highlight the offending stops and shapes on the map. A Vitest harness
+  (``npm --prefix frontend test``) covers the report-grouping helpers.
+
+## Unreleased
+
 ### Changed
 
 - The frontend is now a Vite + single-file-component Vue application

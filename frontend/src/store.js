@@ -9,6 +9,7 @@ export const SNAP_FILTERS = {
 };
 
 export const store = reactive({
+  activeTab: "edit",
   source: null,
   tables: {},
   snapAvailable: false,

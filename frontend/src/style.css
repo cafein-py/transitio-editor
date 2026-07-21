@@ -38,3 +38,13 @@ input.offset { width: 70px; }
 table.times { width: 100%; border-collapse: collapse; font-size: 12px; }
 table.times th { text-align: left; color: #666; font-weight: 500; }
 table.times input { width: 76px; padding: 3px; }
+.tab-bar { display: flex; gap: 6px; margin-bottom: 10px; }
+.tab-bar button { flex: 1; }
+.tab-bar button.active { background: #35507a; color: #fff; border-color: #35507a; }
+.dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #e67e22; margin-left: 4px; vertical-align: middle; }
+.report-summary .count { margin-right: 10px; font-size: 13px; }
+.report-summary .count.error { color: #a33; }
+.report-summary .count.warning { color: #8a6d00; }
+.report-summary .count.info { color: #555; }
+.report table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.report td:last-child { text-align: right; color: #666; }
