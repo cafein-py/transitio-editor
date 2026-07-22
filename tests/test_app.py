@@ -642,17 +642,25 @@ def test_no_feed_loaded_returns_409(tmp_path):
 class _StubCatalog:
     """Stands in for MobilityDatabase so search tests avoid the network."""
 
-    def __init__(self, feeds, *, token=None, error=None):
+    def __init__(self, feeds, *, token=None, error=None, download_path=None):
         self._refresh_token = token
         self._feeds = feeds
         self._error = error
+        self._download_path = download_path
         self.calls = []
+        self.downloaded = []
 
     def search_feeds(self, **kwargs):
         self.calls.append(kwargs)
         if self._error is not None:
             raise self._error
         return self._feeds
+
+    def download_latest(self, feed, directory=None):
+        self.downloaded.append(feed.id)
+        if self._download_path is None:
+            raise RuntimeError("download unavailable")
+        return self._download_path
 
 
 def _catalog_feed(feed_id="mdb-1", *, downloadable=True):
@@ -747,3 +755,77 @@ def test_search_error_returns_502(editor):
     stub = _StubCatalog([], token="tok", error=RuntimeError("boom"))
     client = TestClient(create_app(editor, catalog_factory=lambda: stub))
     assert client.get("/api/search").status_code == 502
+
+
+def test_download_adds_searched_feed_to_catalogue(editor, tmp_path):
+    zip_path = _write_feed(tmp_path / "dl.zip", "d1", 60.4, 25.2)
+    stub = _StubCatalog([_catalog_feed()], token="tok", download_path=zip_path)
+    client = TestClient(create_app(editor, catalog_factory=lambda: stub))
+
+    client.get("/api/search")  # populates the download cache
+    added = client.post("/api/catalogue/download", json={"feed_id": "mdb-1"})
+    assert added.status_code == 200
+    entry = added.json()
+    assert entry["name"] == "HSL" and entry["active"] is True
+    assert stub.downloaded == ["mdb-1"]
+
+    feeds = client.get("/api/catalogue").json()["feeds"]
+    assert len(feeds) == 2
+    assert any(f["source"].endswith("dl.zip") for f in feeds)
+    # the downloaded feed shows on the map (active) alongside the first
+    stops = client.get("/api/stops").json()["features"]
+    assert entry["feed_id"] in {f["properties"]["feed_id"] for f in stops}
+
+
+def test_download_activate_false_loads_hidden(editor, tmp_path):
+    zip_path = _write_feed(tmp_path / "dl.zip", "d1", 60.4, 25.2)
+    stub = _StubCatalog([_catalog_feed()], token="tok", download_path=zip_path)
+    client = TestClient(create_app(editor, catalog_factory=lambda: stub))
+    client.get("/api/search")
+    entry = client.post(
+        "/api/catalogue/download", json={"feed_id": "mdb-1", "activate": False}
+    ).json()
+    assert entry["active"] is False
+
+
+def test_download_unknown_feed_404(editor):
+    stub = _StubCatalog([], token="tok")
+    client = TestClient(create_app(editor, catalog_factory=lambda: stub))
+    assert (
+        client.post("/api/catalogue/download", json={"feed_id": "ghost"}).status_code
+        == 404
+    )
+
+
+def test_download_rejects_malformed(editor):
+    stub = _StubCatalog([_catalog_feed()], token="tok")
+    client = TestClient(create_app(editor, catalog_factory=lambda: stub))
+    assert (
+        client.post("/api/catalogue/download", json={"feed_id": 5}).status_code == 422
+    )
+    assert (
+        client.post(
+            "/api/catalogue/download", json={"feed_id": "mdb-1", "activate": "yes"}
+        ).status_code
+        == 422
+    )
+
+
+def test_download_not_downloadable_422(editor):
+    stub = _StubCatalog([_catalog_feed(downloadable=False)], token="tok")
+    client = TestClient(create_app(editor, catalog_factory=lambda: stub))
+    client.get("/api/search")
+    assert (
+        client.post("/api/catalogue/download", json={"feed_id": "mdb-1"}).status_code
+        == 422
+    )
+
+
+def test_download_failure_returns_502(editor):
+    stub = _StubCatalog([_catalog_feed()], token="tok", download_path=None)
+    client = TestClient(create_app(editor, catalog_factory=lambda: stub))
+    client.get("/api/search")
+    assert (
+        client.post("/api/catalogue/download", json={"feed_id": "mdb-1"}).status_code
+        == 502
+    )

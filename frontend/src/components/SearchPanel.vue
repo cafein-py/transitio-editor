@@ -2,7 +2,7 @@
 import { computed } from "vue";
 import { store } from "../store.js";
 import { feedLocation, safeHttpUrl, sortFeeds } from "../search.js";
-import { runSearch } from "../actions.js";
+import { downloadFeed, runSearch } from "../actions.js";
 
 const sortedResults = computed(() =>
   store.search.sortKey
@@ -59,6 +59,7 @@ function sortArrow(key) {
           <th class="sortable" @click="sortBy('provider')">feed{{ sortArrow("provider") }}</th>
           <th class="sortable" @click="sortBy('location')">location{{ sortArrow("location") }}</th>
           <th class="sortable" @click="sortBy('status')">status{{ sortArrow("status") }}</th>
+          <th></th>
         </tr>
       </thead>
       <tbody>
@@ -77,6 +78,16 @@ function sortArrow(key) {
           </td>
           <td>{{ feedLocation(feed) }}</td>
           <td>{{ feed.status || "—" }}</td>
+          <td>
+            <button
+              v-if="feed.downloadable"
+              class="download"
+              :disabled="store.search.downloadingId === feed.id"
+              @click="downloadFeed(feed)"
+            >
+              {{ store.search.downloadingId === feed.id ? "…" : "Download" }}
+            </button>
+          </td>
         </tr>
       </tbody>
     </table>

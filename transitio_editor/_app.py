@@ -131,6 +131,9 @@ def create_app(
     # The Mobility Database client is built once, on first search, so the
     # editor starts without touching the network or the catalogue export.
     catalog = {"client": None}
+    # Feed objects from searches, keyed by id, so a download can reuse the
+    # catalogue entry's hosted-dataset url (works in the CSV mode too).
+    search_cache = {}
 
     def get_catalog():
         if catalog["client"] is None:
@@ -678,6 +681,8 @@ def create_app(
             )
         except Exception as error:  # noqa: B902
             raise HTTPException(502, f"catalog search failed: {error}") from None
+        for feed in feeds:
+            search_cache[feed.id] = feed
         # No refresh token means search_feeds served the CSV export, which
         # lacks historical datasets and hosted validation reports.
         csv_fallback = not getattr(client, "_refresh_token", None)
@@ -685,5 +690,36 @@ def create_app(
             "feeds": [_feed_result(feed) for feed in feeds],
             "csv_fallback": csv_fallback,
         }
+
+    @app.post("/api/catalogue/download")
+    def catalogue_download(payload: dict = Body(...)):
+        feed_id = payload.get("feed_id")
+        if not isinstance(feed_id, str):
+            raise HTTPException(422, "'feed_id' must be a string")
+        activate = payload.get("activate", True)
+        if not isinstance(activate, bool):
+            raise HTTPException(422, "'activate' must be a boolean")
+        feed = search_cache.get(feed_id)
+        if feed is None:
+            raise HTTPException(404, f"unknown feed {feed_id}; search for it first")
+        if not feed.latest_dataset_url:
+            raise HTTPException(422, f"feed {feed_id} has no downloadable dataset")
+
+        from transitio.edit import FeedEditor
+
+        # Download and load outside the lock; only the registry insert needs it.
+        try:
+            path = get_catalog().download_latest(feed)
+            loaded = FeedEditor(path)
+        except Exception as error:  # noqa: B902
+            raise HTTPException(502, f"download failed: {error}") from None
+        with lock:
+            entry = registry.add(
+                loaded,
+                feed.provider or feed.id,
+                source=os.fspath(path),
+            )
+            entry.active = activate
+            return entry_dict(entry, registry)
 
     return app
