@@ -63,6 +63,7 @@ table.times input { width: 76px; padding: 3px; }
 .search-table .feed-name { font-weight: 600; }
 .search-table .official { color: #2c7a3d; margin-left: 4px; }
 .search-table a { margin-left: 6px; font-size: 11px; }
+.search-table .download { padding: 2px 8px; font-size: 11px; }
 .search code { background: #eee; padding: 0 3px; border-radius: 3px; }
 .report-summary .count { margin-right: 10px; font-size: 13px; }
 .report-summary .count.error { color: #a33; }

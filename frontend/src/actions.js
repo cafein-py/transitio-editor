@@ -271,6 +271,24 @@ export async function runSearch() {
   }
 }
 
+export async function downloadFeed(feed) {
+  store.search.downloadingId = feed.id;
+  try {
+    await api("POST", "/api/catalogue/download", {
+      feed_id: feed.id,
+      activate: true,
+    });
+    await loadCatalogue();
+    await mapBridge.refreshAll(true);
+    store.activeTab = "catalogue";
+    store.status = `downloaded ${feed.provider || feed.id}`;
+  } catch (error) {
+    store.status = error.message;
+  } finally {
+    store.search.downloadingId = null;
+  }
+}
+
 export async function saveFeed() {
   store.saving = true;
   store.saveResult = null;

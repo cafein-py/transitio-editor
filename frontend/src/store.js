@@ -46,6 +46,7 @@ export const store = reactive({
     csvFallback: false,
     sortKey: null,
     sortDir: "asc",
+    downloadingId: null,
   },
   status: "",
 });
