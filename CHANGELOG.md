@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## 0.4.0 — 2026-07-22
+
 ### Added
 
 - Multi-feed catalogue (backend): the editor now holds a registry of
@@ -20,19 +22,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (e.g. a city's separate bus and rail feeds) stay distinguishable;
   mutations, save and validation target the current feed. The CLI still
   opens one feed as the initial catalogue entry.
-
-## Unreleased
-
-### Added
-
+- Catalogue tab (frontend): a tab lists the loaded feeds with their
+  per-feed color, a show toggle (which feeds draw together on the map), a
+  current-feed selector (the edit target), a table summary and a remove
+  button, plus a form to load another feed from a local path. Stop
+  selection, validation highlighting and edits are scoped to the current
+  feed, and switching feeds clears the previous feed's editing state.
 - Validation-report tab: the sidebar now has Edit and Report tabs; the
   Report tab investigates the full transitio validation report —
   severity totals, the computed service window, row counts, and notices
   grouped by code and severity, each expandable to sample contexts that
   highlight the offending stops and shapes on the map. A Vitest harness
   (``npm --prefix frontend test``) covers the report-grouping helpers.
-
-## Unreleased
+- Mobility Database feed search: a Search tab and ``GET /api/search``
+  query the Mobility Database (refresh token from the environment, else
+  the CSV catalogue export) by country, subdivision, municipality and
+  current-map-view bounding box, listing results in a click-to-sort
+  table with license links and location details.
+- Download feeds into the catalogue: ``POST /api/catalogue/download`` and
+  a Download button on each search result fetch the latest hosted dataset
+  and load it as an active catalogue feed.
 
 ### Changed
 
