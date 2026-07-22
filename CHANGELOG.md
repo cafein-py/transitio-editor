@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Multi-feed catalogue (backend): the editor now holds a registry of
+  loaded feeds instead of a single feed. New endpoints — ``GET/POST
+  /api/catalogue``, ``PATCH /api/catalogue/{feed_id}`` (activate/rename),
+  ``PUT /api/catalogue/current`` and ``DELETE /api/catalogue/{feed_id}``
+  — list feeds, load more from local paths, toggle which are active, pick
+  the current edit target and remove feeds. ``/api/stops`` and
+  ``/api/shapes`` aggregate across the active feeds, tagging every
+  feature with its ``feed_id`` and a per-feed color so overlaid feeds
+  (e.g. a city's separate bus and rail feeds) stay distinguishable;
+  mutations, save and validation target the current feed. The CLI still
+  opens one feed as the initial catalogue entry.
+
+## Unreleased
+
+### Added
+
 - Validation-report tab: the sidebar now has Edit and Report tabs; the
   Report tab investigates the full transitio validation report —
   severity totals, the computed service window, row counts, and notices
