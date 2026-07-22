@@ -21,6 +21,20 @@ export function setCursor(kind) {
   if (map) map.getCanvas().style.cursor = kind;
 }
 
+// The current viewport as [minx, miny, maxx, maxy] for a bbox feed
+// search. A viewport that crosses the antimeridian or spans the globe
+// can't be one WGS84 bbox, so skip the bounds filter rather than send a
+// clamped (wrong) one that silently drops the wrapped half.
+export function getViewportBbox() {
+  if (!map) return null;
+  const bounds = map.getBounds();
+  const sw = bounds.getSouthWest();
+  const ne = bounds.getNorthEast();
+  if (ne.lng - sw.lng >= 360 || sw.lng < -180 || ne.lng > 180) return null;
+  const clampLat = (value) => Math.max(-90, Math.min(90, value));
+  return [sw.lng, clampLat(sw.lat), ne.lng, clampLat(ne.lat)];
+}
+
 function renderPreview() {
   const source = map.getSource("preview");
   if (source) {

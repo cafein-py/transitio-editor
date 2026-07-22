@@ -33,6 +33,20 @@ export const store = reactive({
   report: null, // last validation report
   reportStale: false, // edits happened after the last validation
   highlightActive: false,
+  search: {
+    country: "",
+    subdivision: "",
+    municipality: "",
+    officialOnly: false,
+    useMapBounds: false,
+    limit: 50,
+    results: [],
+    searching: false,
+    searched: false,
+    csvFallback: false,
+    sortKey: null,
+    sortDir: "asc",
+  },
   status: "",
 });
 

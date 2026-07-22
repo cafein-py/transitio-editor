@@ -6,6 +6,7 @@ import { createMap } from "./map.js";
 import { loadCatalogue } from "./actions.js";
 import AgencyServiceForm from "./components/AgencyServiceForm.vue";
 import CataloguePanel from "./components/CataloguePanel.vue";
+import SearchPanel from "./components/SearchPanel.vue";
 import FeedSummary from "./components/FeedSummary.vue";
 import ModeBar from "./components/ModeBar.vue";
 import RouteForm from "./components/RouteForm.vue";
@@ -39,6 +40,8 @@ onMounted(() => {
     </div>
 
     <CataloguePanel v-show="store.activeTab === 'catalogue'" />
+
+    <SearchPanel v-show="store.activeTab === 'search'" />
 
     <ValidationReport v-show="store.activeTab === 'report'" />
 

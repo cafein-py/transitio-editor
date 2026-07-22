@@ -637,3 +637,113 @@ def test_no_feed_loaded_returns_409(tmp_path):
         ).status_code
         == 409
     )
+
+
+class _StubCatalog:
+    """Stands in for MobilityDatabase so search tests avoid the network."""
+
+    def __init__(self, feeds, *, token=None, error=None):
+        self._refresh_token = token
+        self._feeds = feeds
+        self._error = error
+        self.calls = []
+
+    def search_feeds(self, **kwargs):
+        self.calls.append(kwargs)
+        if self._error is not None:
+            raise self._error
+        return self._feeds
+
+
+def _catalog_feed(feed_id="mdb-1", *, downloadable=True):
+    from transitio.catalog import Feed
+
+    return Feed.from_api(
+        {
+            "id": feed_id,
+            "provider": "HSL",
+            "status": "active",
+            "is_official": True,
+            "source_info": {
+                "producer_url": "https://p.example",
+                "license_url": "https://l.example",
+            },
+            "locations": [
+                {
+                    "country_code": "FI",
+                    "subdivision_name": "Uusimaa",
+                    "municipality": "Helsinki",
+                }
+            ],
+            "latest_dataset": (
+                {"hosted_url": "https://d.example/latest.zip"} if downloadable else {}
+            ),
+        }
+    )
+
+
+def test_search_returns_serialized_feeds(editor):
+    stub = _StubCatalog([_catalog_feed()], token="tok")
+    client = TestClient(create_app(editor, catalog_factory=lambda: stub))
+    body = client.get("/api/search", params={"municipality": "Helsinki"}).json()
+    assert body["csv_fallback"] is False
+    (feed,) = body["feeds"]
+    assert feed["id"] == "mdb-1"
+    assert feed["provider"] == "HSL"
+    assert feed["locations"] == [
+        {"country": "FI", "subdivision": "Uusimaa", "municipality": "Helsinki"}
+    ]
+    assert feed["official"] is True
+    assert feed["downloadable"] is True
+    assert feed["license_url"] == "https://l.example"
+    assert stub.calls[0]["municipality"] == "Helsinki"
+    assert stub.calls[0]["limit"] == 50
+
+
+def test_search_csv_fallback_when_no_token(editor):
+    stub = _StubCatalog([], token=None)
+    client = TestClient(create_app(editor, catalog_factory=lambda: stub))
+    body = client.get("/api/search").json()
+    assert body["csv_fallback"] is True
+    assert body["feeds"] == []
+
+
+def test_search_forwards_bbox_and_filters(editor):
+    stub = _StubCatalog([], token="tok")
+    client = TestClient(create_app(editor, catalog_factory=lambda: stub))
+    response = client.get(
+        "/api/search",
+        params={
+            "bbox": "24.9,60.1,25.1,60.3",
+            "official": "true",
+            "country": "FI",
+            "limit": "10",
+        },
+    )
+    assert response.status_code == 200
+    call = stub.calls[0]
+    assert call["aoi"] == (24.9, 60.1, 25.1, 60.3)
+    assert call["official_only"] is True
+    assert call["country_code"] == "FI"
+    assert call["limit"] == 10
+
+
+def test_search_rejects_malformed_bbox(editor):
+    stub = _StubCatalog([], token="tok")
+    client = TestClient(create_app(editor, catalog_factory=lambda: stub))
+    for bbox in (
+        "1,2,3",  # wrong arity
+        "a,b,c,d",  # not numbers
+        "nan,0,1,1",  # non-finite
+        "0,0,inf,1",  # non-finite
+        "2,0,1,1",  # reversed longitude
+        "0,0,1,100",  # latitude out of range
+    ):
+        assert client.get("/api/search", params={"bbox": bbox}).status_code == 422, bbox
+    assert stub.calls == []  # never reached the client
+
+
+def test_search_error_returns_502(editor):
+    stub = _StubCatalog([], token="tok", error=RuntimeError("boom"))
+    client = TestClient(create_app(editor, catalog_factory=lambda: stub))
+    assert client.get("/api/search").status_code == 502
