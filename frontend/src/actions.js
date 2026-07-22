@@ -244,6 +244,33 @@ export async function removeFeed(feed) {
   }
 }
 
+export async function runSearch() {
+  const s = store.search;
+  s.searching = true;
+  s.searched = true;
+  try {
+    const params = new URLSearchParams();
+    if (s.country.trim()) params.set("country", s.country.trim());
+    if (s.subdivision.trim()) params.set("subdivision", s.subdivision.trim());
+    if (s.municipality.trim()) params.set("municipality", s.municipality.trim());
+    if (s.officialOnly) params.set("official", "true");
+    if (s.useMapBounds) {
+      const bbox = mapBridge.getViewportBbox();
+      if (bbox) params.set("bbox", bbox.join(","));
+    }
+    params.set("limit", String(s.limit));
+    const body = await api("GET", `/api/search?${params.toString()}`);
+    s.results = body.feeds;
+    s.csvFallback = body.csv_fallback;
+    store.status = "";
+  } catch (error) {
+    s.results = [];
+    store.status = error.message;
+  } finally {
+    s.searching = false;
+  }
+}
+
 export async function saveFeed() {
   store.saving = true;
   store.saveResult = null;

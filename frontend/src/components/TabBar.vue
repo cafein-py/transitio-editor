@@ -15,6 +15,12 @@ import { store } from "../store.js";
       <span v-if="store.catalogue.length > 1" class="badge">{{ store.catalogue.length }}</span>
     </button>
     <button
+      :class="{ active: store.activeTab === 'search' }"
+      @click="store.activeTab = 'search'"
+    >
+      Search
+    </button>
+    <button
       :class="{ active: store.activeTab === 'report' }"
       @click="store.activeTab = 'report'"
     >

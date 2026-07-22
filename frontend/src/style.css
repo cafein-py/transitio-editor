@@ -53,6 +53,17 @@ table.times input { width: 76px; padding: 3px; }
 .catalogue-table .feed-tables { display: block; color: #666; font-size: 11px; }
 .catalogue-table .remove { padding: 1px 7px; line-height: 1; color: #a33; }
 .add-feed { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #555; }
+.check input { width: auto; }
+.search-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+.search-table th { text-align: left; color: #666; font-weight: 500; }
+.search-table th.sortable { cursor: pointer; user-select: none; }
+.search-table th.sortable:hover { color: #35507a; }
+.search-table td { padding: 3px 4px; vertical-align: top; border-top: 1px solid #eee; }
+.search-table .feed-name { font-weight: 600; }
+.search-table .official { color: #2c7a3d; margin-left: 4px; }
+.search-table a { margin-left: 6px; font-size: 11px; }
+.search code { background: #eee; padding: 0 3px; border-radius: 3px; }
 .report-summary .count { margin-right: 10px; font-size: 13px; }
 .report-summary .count.error { color: #a33; }
 .report-summary .count.warning { color: #8a6d00; }

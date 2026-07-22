@@ -16,6 +16,7 @@ def create_app(
     network_type="driving",
     snap_custom_filter=None,
     allowed_hosts=None,
+    catalog_factory=None,
 ):
     """Build the FastAPI app serving a registry of loaded feeds.
 
@@ -45,6 +46,11 @@ def create_app(
     allowed_hosts : list of str, optional
         Accepted ``Host`` header values (DNS-rebinding guard); defaults
         to the loopback names.
+    catalog_factory : callable, optional
+        Zero-argument factory returning a
+        :class:`~transitio.catalog.MobilityDatabase` for ``GET
+        /api/search``; defaults to constructing one lazily (token from
+        the environment, else the CSV fallback). Mainly a test seam.
 
     Returns
     -------
@@ -121,6 +127,20 @@ def create_app(
         if entry is None:
             raise HTTPException(409, "no feed loaded")
         return entry.editor
+
+    # The Mobility Database client is built once, on first search, so the
+    # editor starts without touching the network or the catalogue export.
+    catalog = {"client": None}
+
+    def get_catalog():
+        if catalog["client"] is None:
+            if catalog_factory is not None:
+                catalog["client"] = catalog_factory()
+            else:
+                from transitio.catalog import MobilityDatabase
+
+                catalog["client"] = MobilityDatabase()
+        return catalog["client"]
 
     def _finite(value, field):
         number = float(value)
@@ -603,5 +623,67 @@ def create_app(
             if registry.remove(feed_id) is None:
                 raise HTTPException(404, f"no feed {feed_id}")
             return {"ok": True, "current": registry.current}
+
+    def _feed_result(feed):
+        return {
+            "id": feed.id,
+            "provider": feed.provider,
+            "status": feed.status,
+            "official": feed.official,
+            "locations": [
+                {
+                    "country": location.get("country_code"),
+                    "subdivision": location.get("subdivision_name"),
+                    "municipality": location.get("municipality"),
+                }
+                for location in feed.locations
+            ],
+            "producer_url": feed.producer_url,
+            "license_url": feed.license_url,
+            "downloadable": bool(feed.latest_dataset_url),
+        }
+
+    def _parse_bbox(bbox):
+        parts = bbox.split(",")
+        try:
+            values = [float(value) for value in parts]
+        except ValueError:
+            values = None
+        if values is None or len(values) != 4 or not all(map(math.isfinite, values)):
+            raise HTTPException(422, "bbox must be 'minx,miny,maxx,maxy'")
+        minx, miny, maxx, maxy = values
+        if not (-180 <= minx <= maxx <= 180 and -90 <= miny <= maxy <= 90):
+            raise HTTPException(422, "bbox coordinates out of range or reversed")
+        return (minx, miny, maxx, maxy)
+
+    @app.get("/api/search")
+    def search(
+        country: str | None = None,
+        subdivision: str | None = None,
+        municipality: str | None = None,
+        bbox: str | None = None,
+        official: bool = False,
+        limit: int = 50,
+    ):
+        aoi = _parse_bbox(bbox) if bbox else None
+        client = get_catalog()
+        try:
+            feeds = client.search_feeds(
+                aoi=aoi,
+                country_code=country or None,
+                subdivision=subdivision or None,
+                municipality=municipality or None,
+                official_only=official,
+                limit=limit,
+            )
+        except Exception as error:  # noqa: B902
+            raise HTTPException(502, f"catalog search failed: {error}") from None
+        # No refresh token means search_feeds served the CSV export, which
+        # lacks historical datasets and hosted validation reports.
+        csv_fallback = not getattr(client, "_refresh_token", None)
+        return {
+            "feeds": [_feed_result(feed) for feed in feeds],
+            "csv_fallback": csv_fallback,
+        }
 
     return app
