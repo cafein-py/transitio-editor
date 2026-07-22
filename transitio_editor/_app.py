@@ -519,24 +519,27 @@ def create_app(
 
     @app.post("/api/save")
     def save(payload: dict = Body(default={})):
-        target = payload.get("path") or (
-            os.fspath(current_editor().source)
-            if hasattr(current_editor(), "source")
-            else None
-        )
-        if target is None:
-            raise HTTPException(422, "no output path: pass {'path': ...}")
-        if not str(target).endswith(".zip"):
-            raise HTTPException(422, "output path must end in .zip")
-        try:
-            with lock:
-                report = current_editor().save(target, check=payload.get("check", True))
-        except InvalidFeedError as error:
-            return {"saved": True, "clean": False, "report": error.report}
-        except (TypeError, ValueError) as error:
-            raise HTTPException(422, str(error)) from None
-        clean = not any(notice["severity"] == "ERROR" for notice in report["notices"])
-        return {"saved": True, "clean": clean, "report": report}
+        # Resolve the target and save under one lock so a concurrent
+        # current-feed change can't save the wrong feed to a path.
+        with lock:
+            entry = registry.current_entry()
+            if entry is None:
+                raise HTTPException(409, "no feed loaded")
+            target = payload.get("path") or entry.source
+            if target is None:
+                raise HTTPException(422, "no output path: pass {'path': ...}")
+            if not str(target).endswith(".zip"):
+                raise HTTPException(422, "output path must end in .zip")
+            try:
+                report = entry.editor.save(target, check=payload.get("check", True))
+            except InvalidFeedError as error:
+                return {"saved": True, "clean": False, "report": error.report}
+            except (TypeError, ValueError) as error:
+                raise HTTPException(422, str(error)) from None
+            clean = not any(
+                notice["severity"] == "ERROR" for notice in report["notices"]
+            )
+            return {"saved": True, "clean": clean, "report": report}
 
     @app.get("/api/catalogue")
     def catalogue_list():
@@ -550,10 +553,10 @@ def create_app(
     def catalogue_add(payload: dict = Body(...)):
         from transitio.edit import FeedEditor
 
-        try:
-            path = Path(payload["path"])
-        except KeyError:
-            raise HTTPException(422, "missing field 'path'") from None
+        path_value = payload.get("path")
+        if not isinstance(path_value, str):
+            raise HTTPException(422, "'path' must be a string")
+        path = Path(path_value)
         if not path.exists():
             raise HTTPException(404, f"feed not found: {path}")
         try:
@@ -570,8 +573,10 @@ def create_app(
 
     @app.put("/api/catalogue/current")
     def catalogue_set_current(payload: dict = Body(...)):
+        feed_id = payload.get("feed_id")
+        if not isinstance(feed_id, str):
+            raise HTTPException(422, "'feed_id' must be a string")
         with lock:
-            feed_id = payload.get("feed_id")
             if registry.get(feed_id) is None:
                 raise HTTPException(404, f"no feed {feed_id}")
             registry.current = feed_id
@@ -584,7 +589,10 @@ def create_app(
             if entry is None:
                 raise HTTPException(404, f"no feed {feed_id}")
             if "active" in payload:
-                entry.active = bool(payload["active"])
+                active = payload["active"]
+                if not isinstance(active, bool):
+                    raise HTTPException(422, "'active' must be a boolean")
+                entry.active = active
             if "name" in payload:
                 entry.name = str(payload["name"])
             return entry_dict(entry, registry)

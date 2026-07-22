@@ -614,6 +614,18 @@ def test_catalogue_add_errors(editor, tmp_path):
     assert client.post("/api/catalogue", json={"path": str(bad)}).status_code == 422
 
 
+def test_catalogue_rejects_malformed_inputs(editor):
+    client = TestClient(create_app(editor))
+    assert client.post("/api/catalogue", json={"path": ["a", "b"]}).status_code == 422
+    assert client.post("/api/catalogue", json={"path": None}).status_code == 422
+    assert client.put("/api/catalogue/current", json={"feed_id": 5}).status_code == 422
+    feed_id = client.get("/api/catalogue").json()["feeds"][0]["feed_id"]
+    assert (
+        client.patch(f"/api/catalogue/{feed_id}", json={"active": "false"}).status_code
+        == 422
+    )  # not silently truthy
+
+
 def test_no_feed_loaded_returns_409(tmp_path):
     client = TestClient(create_app())  # empty registry
     assert client.get("/api/feed").json()["currentFeedId"] is None
