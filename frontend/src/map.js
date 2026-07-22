@@ -253,6 +253,16 @@ export function createMap() {
       source: "preview",
       paint: { "line-color": "#c0392b", "line-width": 3, "line-dasharray": [2, 1] },
     });
+    map.addSource("network-preview", {
+      type: "geojson",
+      data: { type: "Feature", geometry: { type: "LineString", coordinates: [] } },
+    });
+    map.addLayer({
+      id: "network-preview",
+      type: "line",
+      source: "network-preview",
+      paint: { "line-color": "#7a4fbf", "line-width": 3, "line-dasharray": [2, 1] },
+    });
     map.addLayer({
       id: "shapes-highlight",
       type: "line",
@@ -323,11 +333,13 @@ export function createMap() {
     // both fire where a node sits on its way and race to set the selection.
     map.on("click", ["network-nodes", "network-ways"], (event) => {
       if (event.defaultPrevented) return; // a stop on top already took it
-      // In add-node/move-node mode a click on a road/node is a placement, not
-      // a selection: fall through to the general handler.
+      // In add-node/move-node/draw-way mode a click on a road/node is a
+      // placement, not a selection: fall through to the general handler.
       if (
         editTarget(store.activeTab) === "network" &&
-        (store.network.mode === "add-node" || store.network.movingNode != null)
+        (store.network.mode === "add-node" ||
+          store.network.mode === "draw-way" ||
+          store.network.movingNode != null)
       ) {
         return;
       }
@@ -385,9 +397,43 @@ export async function fetchNetwork() {
 
 // Map-click edits to the network (add/move a node), the network-side
 // counterpart of handleMapClick; button edits live in actions.js.
+function renderNetworkPreview() {
+  const source = map && map.getSource("network-preview");
+  if (source) {
+    source.setData({
+      type: "Feature",
+      geometry: {
+        type: "LineString",
+        coordinates: store.network.draw.map((v) => v.coord),
+      },
+    });
+  }
+}
+
+export function clearNetworkDraw() {
+  store.network.draw = [];
+  renderNetworkPreview();
+}
+
 async function handleNetworkClick(event) {
   const { lng, lat } = event.lngLat;
   const net = store.network;
+  if (net.mode === "draw-way") {
+    // Resolve the click against what is under it: an existing node is reused,
+    // an existing way is split into a junction, empty space is a new node.
+    const under = map.queryRenderedFeatures(event.point, {
+      layers: ["network-nodes", "network-ways"],
+    });
+    const node = under.find((f) => f.properties.osm_type === "node");
+    const way = under.find((f) => f.properties.osm_type === "way");
+    let vertex;
+    if (node) vertex = { node: node.properties.id };
+    else if (way) vertex = { split_way: way.properties.id, lon: lng, lat };
+    else vertex = { lon: lng, lat };
+    net.draw.push({ vertex, coord: [lng, lat] });
+    renderNetworkPreview();
+    return;
+  }
   try {
     if (net.movingNode != null) {
       await api("PATCH", `/api/network/nodes/${net.movingNode}`, {
