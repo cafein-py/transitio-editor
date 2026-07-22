@@ -1,9 +1,14 @@
 <script setup>
-import { computed, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { store } from "../store.js";
 import { networkTags } from "../network.js";
 import {
+  deleteNetworkNode,
   loadNetwork,
+  resetNetwork,
+  retagNetworkNode,
+  setNetworkMode,
+  startMoveNode,
   toggleFeedVisible,
   toggleNetworkVisible,
 } from "../actions.js";
@@ -20,6 +25,17 @@ watch(
 const selectedTags = computed(() =>
   store.network.selected ? networkTags(store.network.selected) : [],
 );
+const selectedNode = computed(
+  () => store.network.selected && store.network.selected.osm_type === "node",
+);
+
+const tagKey = ref("");
+const tagValue = ref("");
+function applyTag() {
+  retagNetworkNode(tagKey.value, tagValue.value);
+  tagKey.value = "";
+  tagValue.value = "";
+}
 </script>
 
 <template>
@@ -45,6 +61,24 @@ const selectedTags = computed(() =>
         />
         show GTFS feed on map
       </label>
+
+      <div v-if="store.network.loaded" class="mode-row">
+        <button
+          class="mode"
+          :class="{ active: store.network.mode === 'select' }"
+          @click="setNetworkMode('select')"
+        >
+          Select
+        </button>
+        <button
+          class="mode"
+          :class="{ active: store.network.mode === 'add-node' }"
+          @click="setNetworkMode('add-node')"
+        >
+          Add node
+        </button>
+      </div>
+
       <p v-if="store.network.loading" class="hint">loading network…</p>
       <p v-else-if="store.network.error" class="hint net-error">
         {{ store.network.error }}
@@ -66,10 +100,30 @@ const selectedTags = computed(() =>
           </tr>
         </table>
         <p v-else class="hint">no tags</p>
+
+        <template v-if="selectedNode">
+          <div class="mode-row">
+            <button @click="startMoveNode">Move</button>
+            <button class="remove" @click="deleteNetworkNode">Delete</button>
+          </div>
+          <form class="net-retag" @submit.prevent="applyTag">
+            <input v-model="tagKey" placeholder="tag key" />
+            <input v-model="tagValue" placeholder="value" />
+            <button type="submit" :disabled="!tagKey.trim()">Set tag</button>
+          </form>
+        </template>
       </div>
       <p v-else-if="store.network.loaded" class="hint">
-        click a way or node to inspect its tags.
+        click a node to inspect or edit it; Add node then click the map.
       </p>
+
+      <button
+        v-if="store.network.loaded"
+        class="net-reset"
+        @click="resetNetwork"
+      >
+        Discard network edits
+      </button>
     </template>
   </div>
 </template>

@@ -78,3 +78,6 @@ table.times input { width: 76px; padding: 3px; }
 .net-tags td { padding: 1px 4px; vertical-align: top; }
 .net-tags td:first-child { color: #666; white-space: nowrap; }
 .network code { background: #eee; padding: 0 3px; border-radius: 3px; }
+.net-retag { display: flex; gap: 4px; margin-top: 6px; }
+.net-retag input { width: 40%; }
+.net-reset { margin-top: 10px; width: 100%; color: #a33; }

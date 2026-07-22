@@ -323,6 +323,14 @@ export function createMap() {
     // both fire where a node sits on its way and race to set the selection.
     map.on("click", ["network-nodes", "network-ways"], (event) => {
       if (event.defaultPrevented) return; // a stop on top already took it
+      // In add-node/move-node mode a click on a road/node is a placement, not
+      // a selection: fall through to the general handler.
+      if (
+        editTarget(store.activeTab) === "network" &&
+        (store.network.mode === "add-node" || store.network.movingNode != null)
+      ) {
+        return;
+      }
       if (editTarget(store.activeTab) !== "network") {
         // On the feed tab the network is context. Only an idle select click
         // (no pending move, not a placement mode) is a wrong-domain inspect
@@ -344,7 +352,11 @@ export function createMap() {
 
     map.on("click", (event) => {
       if (event.defaultPrevented) return;
-      handleMapClick(event);
+      if (editTarget(store.activeTab) === "network") {
+        handleNetworkClick(event);
+      } else {
+        handleMapClick(event);
+      }
     });
 
     try {
@@ -360,6 +372,40 @@ export function setNetworkData(nodes, ways) {
   if (!map) return;
   map.getSource("network-ways").setData(ways);
   map.getSource("network-nodes").setData(nodes);
+}
+
+// Refetch the network into the map (after an edit or the initial load). One
+// combined request keeps nodes and ways from the same editor generation.
+export async function fetchNetwork() {
+  const { nodes, ways } = await api("GET", "/api/network/features");
+  setNetworkData(nodes, ways);
+  store.network.nodeCount = nodes.features.length;
+  store.network.wayCount = ways.features.length;
+}
+
+// Map-click edits to the network (add/move a node), the network-side
+// counterpart of handleMapClick; button edits live in actions.js.
+async function handleNetworkClick(event) {
+  const { lng, lat } = event.lngLat;
+  const net = store.network;
+  try {
+    if (net.movingNode != null) {
+      await api("PATCH", `/api/network/nodes/${net.movingNode}`, {
+        lon: lng,
+        lat,
+      });
+      net.movingNode = null;
+      store.status = "";
+      await fetchNetwork();
+      return;
+    }
+    if (net.mode === "add-node") {
+      await api("POST", "/api/network/nodes", { lon: lng, lat });
+      await fetchNetwork();
+    }
+  } catch (error) {
+    store.status = error.message;
+  }
 }
 
 function setGroupVisible(layers, visible) {

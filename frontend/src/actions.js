@@ -23,20 +23,71 @@ export async function loadNetwork() {
   net.loading = true;
   net.error = "";
   try {
-    const [nodes, ways] = await Promise.all([
-      api("GET", "/api/network/nodes"),
-      api("GET", "/api/network/ways"),
-    ]);
     await mapBridge.mapReady; // sources exist before we set their data
-    mapBridge.setNetworkData(nodes, ways);
-    net.nodeCount = nodes.features.length;
-    net.wayCount = ways.features.length;
+    await mapBridge.fetchNetwork();
     net.loaded = true;
     mapBridge.setNetworkVisible(net.visible);
   } catch (error) {
     net.error = error.message;
   } finally {
     net.loading = false;
+  }
+}
+
+export function setNetworkMode(mode) {
+  store.network.mode = mode;
+  store.network.movingNode = null;
+  mapBridge.setCursor(mode === "add-node" ? "crosshair" : "");
+}
+
+export function startMoveNode() {
+  const selected = store.network.selected;
+  if (!selected) return;
+  store.network.movingNode = selected.id;
+  store.status = "click the new location of the node";
+  mapBridge.setCursor("crosshair");
+}
+
+export async function deleteNetworkNode() {
+  const selected = store.network.selected;
+  if (!selected) return;
+  try {
+    await api("DELETE", `/api/network/nodes/${selected.id}`);
+    store.network.selected = null;
+    await mapBridge.fetchNetwork();
+    store.status = "";
+  } catch (error) {
+    store.status = error.message;
+  }
+}
+
+export async function retagNetworkNode(key, value) {
+  const selected = store.network.selected;
+  if (!selected || !key.trim()) return;
+  try {
+    await api("PATCH", `/api/network/nodes/${selected.id}`, {
+      tags: { [key.trim()]: value },
+    });
+    // reflect the tag on the still-selected node without a re-click
+    store.network.selected = { ...selected, [key.trim()]: value };
+    await mapBridge.fetchNetwork();
+    store.status = "";
+  } catch (error) {
+    store.status = error.message;
+  }
+}
+
+export async function resetNetwork() {
+  try {
+    await api("POST", "/api/network/reset");
+    store.network.selected = null;
+    store.network.movingNode = null;
+    store.network.mode = "select";
+    mapBridge.setCursor("");
+    await mapBridge.fetchNetwork();
+    store.status = "network edits discarded";
+  } catch (error) {
+    store.status = error.message;
   }
 }
 

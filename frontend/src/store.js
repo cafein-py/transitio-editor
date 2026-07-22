@@ -42,6 +42,8 @@ export const store = reactive({
     nodeCount: 0,
     wayCount: 0,
     selected: null, // inspected feature properties, or null
+    mode: "select", // "select" | "add-node"
+    movingNode: null, // id of a node awaiting its new location
     error: "",
   },
   search: {
