@@ -10,14 +10,14 @@ def _geojson_feature(geometry_mapping, properties):
 
 
 def create_app(
-    editor,
+    editor=None,
     *,
     osm_pbf=None,
     network_type="driving",
     snap_custom_filter=None,
     allowed_hosts=None,
 ):
-    """Build the FastAPI app serving one :class:`~transitio.FeedEditor`.
+    """Build the FastAPI app serving a registry of loaded feeds.
 
     The app exposes the feed's tables and geometries, mutation endpoints
     mirroring the editor helpers, a snapping endpoint backed by
@@ -28,8 +28,11 @@ def create_app(
 
     Parameters
     ----------
-    editor : FeedEditor or FeedBuilder
-        The feed being edited; mutations apply to it in place.
+    editor : FeedEditor or FeedBuilder, optional
+        The first feed loaded into the catalogue (the CLI's opened
+        feed). More feeds are added through the catalogue endpoints;
+        mutations target the current feed, display aggregates the active
+        feeds.
     osm_pbf : str or pathlib.Path, optional
         OSM extract enabling ``POST /api/shapes/snap`` (requires the
         ``transitio[snap]`` extra).
@@ -99,8 +102,25 @@ def create_app(
         return await call_next(request)
 
     # FastAPI runs sync handlers in a threadpool; one lock serializes
-    # every touch of the shared editor.
+    # every touch of the shared current_editor().
     lock = threading.Lock()
+
+    from transitio_editor._registry import FeedRegistry, default_name, entry_dict
+
+    registry = FeedRegistry()
+    if editor is not None:
+        source = getattr(editor, "source", None)
+        registry.add(
+            editor,
+            default_name(editor),
+            source=os.fspath(source) if source else None,
+        )
+
+    def current_editor():
+        entry = registry.current_entry()
+        if entry is None:
+            raise HTTPException(409, "no feed loaded")
+        return entry.editor
 
     def _finite(value, field):
         number = float(value)
@@ -125,12 +145,21 @@ def create_app(
             return _feed_summary()
 
     def _feed_summary():
+        entry = registry.current_entry()
+        if entry is None:
+            return {
+                "source": None,
+                "snapAvailable": osm_pbf is not None,
+                "tables": {},
+                "currentFeedId": None,
+            }
         return {
-            "source": (os.fspath(editor.source) if hasattr(editor, "source") else None),
+            "source": entry.source,
             "snapAvailable": osm_pbf is not None,
             "tables": {
-                name: len(table) for name, table in sorted(editor.tables.items())
+                name: len(table) for name, table in sorted(entry.editor.tables.items())
             },
+            "currentFeedId": entry.feed_id,
         }
 
     @app.get("/api/tables/{name}")
@@ -139,9 +168,9 @@ def create_app(
             return _table(name, offset, limit)
 
     def _table(name, offset, limit):
-        if name not in editor.tables:
+        if name not in current_editor().tables:
             raise HTTPException(404, f"no table {name}")
-        frame = editor.tables[name]
+        frame = current_editor().tables[name]
         window = frame.iloc[offset : offset + max(0, min(limit, 10_000))]
         return {
             "name": name,
@@ -157,19 +186,25 @@ def create_app(
             return _stops_geojson()
 
     def _stops_geojson():
-        try:
-            frame = editor.stops
-        except ValueError:
-            return {"type": "FeatureCollection", "features": []}
         features = []
-        for _, row in frame.iterrows():
-            geometry = row.geometry
-            if geometry is None:
+        for entry in registry.active_entries():
+            try:
+                frame = entry.editor.stops
+            except ValueError:
                 continue
-            properties = {
-                key: value for key, value in row.items() if key != frame.geometry.name
-            }
-            features.append(_geojson_feature(geometry.__geo_interface__, properties))
+            name_column = frame.geometry.name
+            for _, row in frame.iterrows():
+                geometry = row.geometry
+                if geometry is None:
+                    continue
+                properties = {
+                    key: value for key, value in row.items() if key != name_column
+                }
+                properties["feed_id"] = entry.feed_id
+                properties["feed_color"] = entry.color
+                features.append(
+                    _geojson_feature(geometry.__geo_interface__, properties)
+                )
         return {"type": "FeatureCollection", "features": features}
 
     @app.get("/api/shapes")
@@ -178,24 +213,32 @@ def create_app(
             return _shapes_geojson()
 
     def _shapes_geojson():
-        try:
-            frame = editor.shapes
-        except ValueError:
-            return {"type": "FeatureCollection", "features": []}
-        features = [
-            _geojson_feature(
-                row.geometry.__geo_interface__, {"shape_id": row["shape_id"]}
-            )
-            for _, row in frame.iterrows()
-            if row.geometry is not None
-        ]
+        features = []
+        for entry in registry.active_entries():
+            try:
+                frame = entry.editor.shapes
+            except ValueError:
+                continue
+            for _, row in frame.iterrows():
+                if row.geometry is None:
+                    continue
+                features.append(
+                    _geojson_feature(
+                        row.geometry.__geo_interface__,
+                        {
+                            "shape_id": row["shape_id"],
+                            "feed_id": entry.feed_id,
+                            "feed_color": entry.color,
+                        },
+                    )
+                )
         return {"type": "FeatureCollection", "features": features}
 
     @app.post("/api/stops")
     def add_stop(payload: dict = Body(...)):
         try:
             with lock:
-                editor.add_stop(
+                current_editor().add_stop(
                     payload["stop_id"],
                     payload["stop_name"],
                     _finite(payload["stop_lat"], "stop_lat"),
@@ -211,7 +254,7 @@ def create_app(
     def update_stop(stop_id: str, payload: dict = Body(...)):
         try:
             with lock:
-                editor.update_stop(stop_id, **payload)
+                current_editor().update_stop(stop_id, **payload)
         except AttributeError:
             raise HTTPException(
                 501, "this operation needs a loaded feed (FeedEditor)"
@@ -226,7 +269,7 @@ def create_app(
     def add_agency(payload: dict = Body(...)):
         try:
             with lock:
-                editor.add_agency(
+                current_editor().add_agency(
                     payload["agency_id"],
                     payload["agency_name"],
                     payload["agency_url"],
@@ -242,7 +285,7 @@ def create_app(
     def add_service(payload: dict = Body(...)):
         try:
             with lock:
-                editor.add_service(
+                current_editor().add_service(
                     payload["service_id"],
                     payload["days"],
                     payload["start_date"],
@@ -258,7 +301,7 @@ def create_app(
     def add_route(payload: dict = Body(...)):
         try:
             with lock:
-                editor.add_route(
+                current_editor().add_route(
                     payload["route_id"],
                     int(payload["route_type"]),
                     payload["route_short_name"],
@@ -274,7 +317,7 @@ def create_app(
     def update_route(route_id: str, payload: dict = Body(...)):
         try:
             with lock:
-                editor.update_route(route_id, **payload)
+                current_editor().update_route(route_id, **payload)
         except AttributeError:
             raise HTTPException(
                 501, "this operation needs a loaded feed (FeedEditor)"
@@ -289,7 +332,7 @@ def create_app(
     def drop_route(route_id: str):
         try:
             with lock:
-                editor.drop_route(route_id)
+                current_editor().drop_route(route_id)
         except AttributeError:
             raise HTTPException(
                 501, "this operation needs a loaded feed (FeedEditor)"
@@ -302,7 +345,7 @@ def create_app(
     def add_trip(payload: dict = Body(...)):
         try:
             with lock:
-                editor.add_trip(
+                current_editor().add_trip(
                     payload["route_id"],
                     payload["service_id"],
                     payload["trip_id"],
@@ -319,7 +362,7 @@ def create_app(
     def shift_trip(trip_id: str, payload: dict = Body(...)):
         try:
             with lock:
-                editor.shift_trip(trip_id, int(payload["seconds"]))
+                current_editor().shift_trip(trip_id, int(payload["seconds"]))
         except AttributeError:
             raise HTTPException(
                 501, "this operation needs a loaded feed (FeedEditor)"
@@ -334,7 +377,7 @@ def create_app(
     def set_headway(payload: dict = Body(...)):
         try:
             with lock:
-                editor.set_headway(
+                current_editor().set_headway(
                     payload["trip_id"],
                     payload["headway"],
                     window=payload.get("window"),
@@ -355,7 +398,7 @@ def create_app(
     def add_frequency_trip(payload: dict = Body(...)):
         try:
             with lock:
-                editor.add_frequency_trip(
+                current_editor().add_frequency_trip(
                     payload["route_id"],
                     payload["service_id"],
                     payload["trip_id"],
@@ -375,7 +418,7 @@ def create_app(
     def add_shape(payload: dict = Body(...)):
         try:
             with lock:
-                editor.add_shape(payload["shape_id"], payload["points"])
+                current_editor().add_shape(payload["shape_id"], payload["points"])
         except KeyError as error:
             raise HTTPException(422, f"missing field {error}") from None
         except (TypeError, ValueError) as error:
@@ -415,21 +458,21 @@ def create_app(
         from transitio_editor import _timetable
 
         with lock:
-            return {"routes": _timetable.list_routes(editor)}
+            return {"routes": _timetable.list_routes(current_editor())}
 
     @app.get("/api/routes/{route_id:path}/trips")
     def route_trips(route_id: str):
         from transitio_editor import _timetable
 
         with lock:
-            return {"trips": _timetable.list_trips(editor, route_id)}
+            return {"trips": _timetable.list_trips(current_editor(), route_id)}
 
     @app.get("/api/trips/{trip_id:path}/times")
     def get_trip_times(trip_id: str):
         from transitio_editor import _timetable
 
         with lock:
-            records = _timetable.trip_times(editor, trip_id)
+            records = _timetable.trip_times(current_editor(), trip_id)
         if records is None:
             raise HTTPException(404, f"no trip {trip_id}")
         return {"trip_id": trip_id, "times": records}
@@ -440,7 +483,7 @@ def create_app(
 
         try:
             with lock:
-                _timetable.set_trip_times(editor, trip_id, payload["times"])
+                _timetable.set_trip_times(current_editor(), trip_id, payload["times"])
         except KeyError as error:
             raise HTTPException(422, f"missing field {error}") from None
         except LookupError as error:
@@ -455,7 +498,7 @@ def create_app(
 
         try:
             with lock:
-                _timetable.drop_trip(editor, trip_id)
+                _timetable.drop_trip(current_editor(), trip_id)
         except LookupError as error:
             raise HTTPException(404, str(error)) from None
         return {"ok": True}
@@ -467,7 +510,7 @@ def create_app(
 
         try:
             with lock, tempfile.TemporaryDirectory() as scratch:
-                report = editor.save(
+                report = current_editor().save(
                     os.path.join(scratch, "current.zip"), check=False, **payload
                 )
         except (TypeError, ValueError) as error:
@@ -476,21 +519,89 @@ def create_app(
 
     @app.post("/api/save")
     def save(payload: dict = Body(default={})):
-        target = payload.get("path") or (
-            os.fspath(editor.source) if hasattr(editor, "source") else None
-        )
-        if target is None:
-            raise HTTPException(422, "no output path: pass {'path': ...}")
-        if not str(target).endswith(".zip"):
-            raise HTTPException(422, "output path must end in .zip")
+        # Resolve the target and save under one lock so a concurrent
+        # current-feed change can't save the wrong feed to a path.
+        with lock:
+            entry = registry.current_entry()
+            if entry is None:
+                raise HTTPException(409, "no feed loaded")
+            target = payload.get("path") or entry.source
+            if target is None:
+                raise HTTPException(422, "no output path: pass {'path': ...}")
+            if not str(target).endswith(".zip"):
+                raise HTTPException(422, "output path must end in .zip")
+            try:
+                report = entry.editor.save(target, check=payload.get("check", True))
+            except InvalidFeedError as error:
+                return {"saved": True, "clean": False, "report": error.report}
+            except (TypeError, ValueError) as error:
+                raise HTTPException(422, str(error)) from None
+            clean = not any(
+                notice["severity"] == "ERROR" for notice in report["notices"]
+            )
+            return {"saved": True, "clean": clean, "report": report}
+
+    @app.get("/api/catalogue")
+    def catalogue_list():
+        with lock:
+            return {
+                "feeds": [entry_dict(entry, registry) for entry in registry.entries()],
+                "current": registry.current,
+            }
+
+    @app.post("/api/catalogue")
+    def catalogue_add(payload: dict = Body(...)):
+        from transitio.edit import FeedEditor
+
+        path_value = payload.get("path")
+        if not isinstance(path_value, str):
+            raise HTTPException(422, "'path' must be a string")
+        path = Path(path_value)
+        if not path.exists():
+            raise HTTPException(404, f"feed not found: {path}")
         try:
-            with lock:
-                report = editor.save(target, check=payload.get("check", True))
-        except InvalidFeedError as error:
-            return {"saved": True, "clean": False, "report": error.report}
-        except (TypeError, ValueError) as error:
-            raise HTTPException(422, str(error)) from None
-        clean = not any(notice["severity"] == "ERROR" for notice in report["notices"])
-        return {"saved": True, "clean": clean, "report": report}
+            loaded = FeedEditor(path)
+        except Exception as error:  # noqa: B902
+            raise HTTPException(422, f"cannot load feed: {error}") from None
+        with lock:
+            entry = registry.add(
+                loaded,
+                payload.get("name") or default_name(loaded),
+                source=os.fspath(path),
+            )
+            return entry_dict(entry, registry)
+
+    @app.put("/api/catalogue/current")
+    def catalogue_set_current(payload: dict = Body(...)):
+        feed_id = payload.get("feed_id")
+        if not isinstance(feed_id, str):
+            raise HTTPException(422, "'feed_id' must be a string")
+        with lock:
+            if registry.get(feed_id) is None:
+                raise HTTPException(404, f"no feed {feed_id}")
+            registry.current = feed_id
+            return {"current": registry.current}
+
+    @app.patch("/api/catalogue/{feed_id:path}")
+    def catalogue_update(feed_id: str, payload: dict = Body(...)):
+        with lock:
+            entry = registry.get(feed_id)
+            if entry is None:
+                raise HTTPException(404, f"no feed {feed_id}")
+            if "active" in payload:
+                active = payload["active"]
+                if not isinstance(active, bool):
+                    raise HTTPException(422, "'active' must be a boolean")
+                entry.active = active
+            if "name" in payload:
+                entry.name = str(payload["name"])
+            return entry_dict(entry, registry)
+
+    @app.delete("/api/catalogue/{feed_id:path}")
+    def catalogue_remove(feed_id: str):
+        with lock:
+            if registry.remove(feed_id) is None:
+                raise HTTPException(404, f"no feed {feed_id}")
+            return {"ok": True, "current": registry.current}
 
     return app

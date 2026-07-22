@@ -504,3 +504,136 @@ def test_drop_trip_cascades_trip_references(editor):
     assert client.delete("/api/trips/t1").status_code == 200
     assert client.get("/api/tables/transfers.txt").json()["total"] == 0
     assert client.get("/api/tables/attributions.txt").json()["total"] == 0
+
+
+def _write_feed(path, stop_id, lat, lon):
+    b = FeedBuilder()
+    b.add_agency("a", "A", "https://a.example", "Europe/Helsinki")
+    b.add_stop(stop_id, stop_id, lat, lon)
+    b.add_route("r", 3, "1", agency_id="a")
+    b.add_service("wk", "weekdays", "20260101", "20261231")
+    b.add_trip(
+        "t",
+        "wk",
+        "t1",
+        [(stop_id, "08:00:00", "08:00:00"), (stop_id, "08:05:00", "08:05:00")],
+    )
+    b.save(path, check=False)
+    return path
+
+
+def test_catalogue_single_feed_default(editor):
+    client = TestClient(create_app(editor))
+    body = client.get("/api/catalogue").json()
+    assert len(body["feeds"]) == 1
+    only = body["feeds"][0]
+    assert only["current"] is True and only["active"] is True
+    assert only["color"].startswith("#")
+    assert body["current"] == only["feed_id"]
+
+
+def test_catalogue_add_activate_and_overlay(editor, tmp_path):
+    client = TestClient(create_app(editor))
+    other = _write_feed(tmp_path / "other.zip", "z9", 60.30, 25.10)
+
+    added = client.post("/api/catalogue", json={"path": str(other), "name": "Metro"})
+    assert added.status_code == 200
+    entry = added.json()
+    assert entry["name"] == "Metro"
+    assert entry["current"] is False  # first feed stays current
+
+    feeds = client.get("/api/catalogue").json()["feeds"]
+    assert len(feeds) == 2
+    # both active -> stops aggregate across feeds, each tagged with feed_id
+    stops = client.get("/api/stops").json()["features"]
+    feed_ids = {f["properties"]["feed_id"] for f in stops}
+    assert feed_ids == {feeds[0]["feed_id"], feeds[1]["feed_id"]}
+    assert all("feed_color" in f["properties"] for f in stops)
+
+    # deactivate the second feed -> only the first feed's stops show
+    client.patch(f"/api/catalogue/{entry['feed_id']}", json={"active": False})
+    stops = client.get("/api/stops").json()["features"]
+    assert {f["properties"]["feed_id"] for f in stops} == {feeds[0]["feed_id"]}
+
+
+def test_catalogue_set_current_scopes_mutations(editor, tmp_path):
+    client = TestClient(create_app(editor))
+    other = _write_feed(tmp_path / "other.zip", "z9", 60.30, 25.10)
+    entry = client.post("/api/catalogue", json={"path": str(other)}).json()
+
+    # current is still the first feed; add a stop -> goes to first feed
+    client.post(
+        "/api/stops",
+        json={"stop_id": "new1", "stop_name": "N1", "stop_lat": 60.2, "stop_lon": 24.9},
+    )
+    # switch current to the second feed; the summary follows
+    assert (
+        client.put(
+            "/api/catalogue/current", json={"feed_id": entry["feed_id"]}
+        ).status_code
+        == 200
+    )
+    summary = client.get("/api/feed").json()
+    assert summary["currentFeedId"] == entry["feed_id"]
+    assert "new1" not in {
+        r["stop_id"] for r in client.get("/api/tables/stops.txt").json()["rows"]
+    }
+
+    assert (
+        client.put("/api/catalogue/current", json={"feed_id": "nope"}).status_code
+        == 404
+    )
+
+
+def test_catalogue_remove_reassigns_current(editor, tmp_path):
+    client = TestClient(create_app(editor))
+    entry = client.post(
+        "/api/catalogue",
+        json={"path": str(_write_feed(tmp_path / "b.zip", "z", 60.3, 25.1))},
+    ).json()
+    feeds = client.get("/api/catalogue").json()
+    first = feeds["current"]
+
+    removed = client.delete(f"/api/catalogue/{first}")
+    assert removed.status_code == 200
+    assert removed.json()["current"] == entry["feed_id"]  # reassigned
+    assert client.delete("/api/catalogue/first").status_code == 404
+
+
+def test_catalogue_add_errors(editor, tmp_path):
+    client = TestClient(create_app(editor))
+    assert client.post("/api/catalogue", json={}).status_code == 422
+    assert (
+        client.post(
+            "/api/catalogue", json={"path": str(tmp_path / "absent.zip")}
+        ).status_code
+        == 404
+    )
+    bad = tmp_path / "bad.zip"
+    bad.write_bytes(b"not a zip")
+    assert client.post("/api/catalogue", json={"path": str(bad)}).status_code == 422
+
+
+def test_catalogue_rejects_malformed_inputs(editor):
+    client = TestClient(create_app(editor))
+    assert client.post("/api/catalogue", json={"path": ["a", "b"]}).status_code == 422
+    assert client.post("/api/catalogue", json={"path": None}).status_code == 422
+    assert client.put("/api/catalogue/current", json={"feed_id": 5}).status_code == 422
+    feed_id = client.get("/api/catalogue").json()["feeds"][0]["feed_id"]
+    assert (
+        client.patch(f"/api/catalogue/{feed_id}", json={"active": "false"}).status_code
+        == 422
+    )  # not silently truthy
+
+
+def test_no_feed_loaded_returns_409(tmp_path):
+    client = TestClient(create_app())  # empty registry
+    assert client.get("/api/feed").json()["currentFeedId"] is None
+    assert client.get("/api/catalogue").json()["feeds"] == []
+    assert (
+        client.post(
+            "/api/stops",
+            json={"stop_id": "s", "stop_name": "S", "stop_lat": 60.1, "stop_lon": 24.9},
+        ).status_code
+        == 409
+    )
