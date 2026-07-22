@@ -3,9 +3,10 @@ import { onMounted } from "vue";
 
 import { store } from "./store.js";
 import { createMap } from "./map.js";
-import { loadCatalogue } from "./actions.js";
+import { checkNetworkAvailable, loadCatalogue } from "./actions.js";
 import AgencyServiceForm from "./components/AgencyServiceForm.vue";
 import CataloguePanel from "./components/CataloguePanel.vue";
+import NetworkPanel from "./components/NetworkPanel.vue";
 import SearchPanel from "./components/SearchPanel.vue";
 import FeedSummary from "./components/FeedSummary.vue";
 import ModeBar from "./components/ModeBar.vue";
@@ -20,6 +21,7 @@ import ValidationReport from "./components/ValidationReport.vue";
 onMounted(() => {
   createMap();
   loadCatalogue();
+  checkNetworkAvailable();
 });
 </script>
 
@@ -38,6 +40,8 @@ onMounted(() => {
       <TimetablePanel />
       <SaveBar />
     </div>
+
+    <NetworkPanel v-show="store.activeTab === 'network'" />
 
     <CataloguePanel v-show="store.activeTab === 'catalogue'" />
 

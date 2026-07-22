@@ -6,8 +6,15 @@ import "maplibre-gl/dist/maplibre-gl.css";
 
 import { api } from "./api.js";
 import { SNAP_FILTERS, store } from "./store.js";
+import { editTarget } from "./network.js";
 
 let map = null;
+// Resolves once the map's sources and layers exist, so network data applied
+// from actions never races the map "load" event.
+let resolveMapReady;
+export const mapReady = new Promise((resolve) => {
+  resolveMapReady = resolve;
+});
 let drawnPoints = []; // [lat, lon]
 let previewCoords = []; // [lon, lat]
 let drawSequence = 0; // discards out-of-order snap responses
@@ -129,6 +136,9 @@ export function highlightContext(context) {
 }
 
 async function handleMapClick(event) {
+  // Map clicks mutate the feed (move/add stop, draw); inert while the OSM
+  // network is the edit target.
+  if (editTarget(store.activeTab) !== "feed") return;
   const { lng, lat } = event.lngLat;
   try {
     if (store.movingStop) {
@@ -195,7 +205,7 @@ export function createMap() {
   map.addControl(new maplibregl.NavigationControl());
 
   map.on("load", async () => {
-    for (const id of ["stops", "shapes"]) {
+    for (const id of ["stops", "shapes", "network-ways", "network-nodes"]) {
       map.addSource(id, {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
@@ -204,6 +214,28 @@ export function createMap() {
     map.addSource("preview", {
       type: "geojson",
       data: { type: "Feature", geometry: { type: "LineString", coordinates: [] } },
+    });
+    // OSM network under the GTFS layers: ways always, nodes only when zoomed
+    // in (a whole-city node layer is too dense otherwise).
+    map.addLayer({
+      id: "network-ways",
+      type: "line",
+      source: "network-ways",
+      layout: { visibility: "none" },
+      paint: { "line-color": "#7a4fbf", "line-width": 1.5, "line-opacity": 0.6 },
+    });
+    map.addLayer({
+      id: "network-nodes",
+      type: "circle",
+      source: "network-nodes",
+      minzoom: 15,
+      layout: { visibility: "none" },
+      paint: {
+        "circle-radius": 3,
+        "circle-color": "#7a4fbf",
+        "circle-stroke-color": "#fff",
+        "circle-stroke-width": 1,
+      },
     });
     map.addLayer({
       id: "shapes",
@@ -254,6 +286,10 @@ export function createMap() {
 
     map.on("click", "stops", (event) => {
       if (store.movingStop || store.mode !== "select") return;
+      // While editing the OSM network, stops are context: ignore them
+      // silently (no preventDefault) so a network feature under the same
+      // click stays inspectable.
+      if (editTarget(store.activeTab) !== "feed") return;
       // Co-located stops from several active feeds can share one click;
       // prefer the current feed's stop so it stays editable under an
       // overlay. Edits target the current feed; others are context only.
@@ -283,6 +319,29 @@ export function createMap() {
       }
       event.preventDefault();
     });
+    // One handler over both network layers: two separate listeners would
+    // both fire where a node sits on its way and race to set the selection.
+    map.on("click", ["network-nodes", "network-ways"], (event) => {
+      if (event.defaultPrevented) return; // a stop on top already took it
+      if (editTarget(store.activeTab) !== "network") {
+        // On the feed tab the network is context. Only an idle select click
+        // (no pending move, not a placement mode) is a wrong-domain inspect
+        // worth a hint; otherwise it falls through so a stop/shape point —
+        // including a stop being moved — can be dropped onto a road.
+        if (store.mode === "select" && !store.movingStop) {
+          store.status = "switch to the Network tab to inspect the network";
+          event.preventDefault();
+        }
+        return;
+      }
+      const feature =
+        event.features.find((f) => f.properties.osm_type === "node") ||
+        event.features[0];
+      store.network.selected = { ...feature.properties };
+      store.status = "";
+      event.preventDefault();
+    });
+
     map.on("click", (event) => {
       if (event.defaultPrevented) return;
       handleMapClick(event);
@@ -293,5 +352,30 @@ export function createMap() {
     } catch (error) {
       store.status = error.message;
     }
+    resolveMapReady();
   });
+}
+
+export function setNetworkData(nodes, ways) {
+  if (!map) return;
+  map.getSource("network-ways").setData(ways);
+  map.getSource("network-nodes").setData(nodes);
+}
+
+function setGroupVisible(layers, visible) {
+  if (!map) return;
+  const value = visible ? "visible" : "none";
+  for (const layer of layers) {
+    // The layers are created in the async map "load" handler; guard against
+    // a toggle that arrives before then.
+    if (map.getLayer(layer)) map.setLayoutProperty(layer, "visibility", value);
+  }
+}
+
+export function setNetworkVisible(visible) {
+  setGroupVisible(["network-ways", "network-nodes"], visible);
+}
+
+export function setFeedVisible(visible) {
+  setGroupVisible(["stops", "shapes", "stops-highlight", "shapes-highlight"], visible);
 }

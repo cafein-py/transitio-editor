@@ -28,6 +28,20 @@ def main(argv=None):
         help='default pyrosm tag filter for snapping, e.g. \'{"railway": '
         '["tram"]}\' to snap to tram rails (overrides --network-type)',
     )
+    parser.add_argument(
+        "--network-filter",
+        metavar="JSON",
+        help="pyrosm tag filter selecting the editable OSM network shown in "
+        "the Network tab (default: all highways plus tram/rail/light_rail/"
+        "subway)",
+    )
+    parser.add_argument(
+        "--max-network-ways",
+        type=int,
+        default=50000,
+        help="refuse to serve an OSM network larger than this many ways "
+        "(default: 50000; 0 disables)",
+    )
     parser.add_argument("--host", default="127.0.0.1", help="bind address")
     parser.add_argument("--port", type=int, default=8300, help="port")
     parser.add_argument(
@@ -50,16 +64,26 @@ def main(argv=None):
             "the editor has no authentication; refusing a non-loopback "
             "host without --allow-remote"
         )
-    snap_filter = None
-    if args.snap_filter:
+
+    def _json_filter(value, flag):
         import json
 
         try:
-            snap_filter = json.loads(args.snap_filter)
+            parsed = json.loads(value)
         except json.JSONDecodeError as error:
-            parser.error(f"--snap-filter is not valid JSON: {error}")
-        if not isinstance(snap_filter, dict):
-            parser.error("--snap-filter must be a JSON object")
+            parser.error(f"{flag} is not valid JSON: {error}")
+        if not isinstance(parsed, dict):
+            parser.error(f"{flag} must be a JSON object")
+        return parsed
+
+    snap_filter = (
+        _json_filter(args.snap_filter, "--snap-filter") if args.snap_filter else None
+    )
+    network_filter = (
+        _json_filter(args.network_filter, "--network-filter")
+        if args.network_filter
+        else None
+    )
     editor = FeedEditor(args.feed)
     # Host-header pinning stays on in remote mode: only the address the
     # server was bound under is accepted, not arbitrary rebindable names.
@@ -74,6 +98,8 @@ def main(argv=None):
         osm_pbf=args.osm_pbf,
         network_type=args.network_type,
         snap_custom_filter=snap_filter,
+        network_filter=network_filter,
+        max_network_ways=args.max_network_ways,
         allowed_hosts=allowed,
     )
     print(f"transitio editor on http://{args.host}:{args.port}")

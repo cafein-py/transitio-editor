@@ -33,6 +33,17 @@ export const store = reactive({
   report: null, // last validation report
   reportStale: false, // edits happened after the last validation
   highlightActive: false,
+  feedVisible: true, // GTFS layer group visibility toggle
+  network: {
+    available: false, // an OSM extract was loaded (--osm-pbf)
+    loaded: false, // node/way GeoJSON fetched into the map
+    loading: false,
+    visible: true, // layer visibility toggle
+    nodeCount: 0,
+    wayCount: 0,
+    selected: null, // inspected feature properties, or null
+    error: "",
+  },
   search: {
     country: "",
     subdivision: "",

@@ -16,7 +16,7 @@ dependencies = [
     "fastapi>=0.115",
     # the editor uses transitio.edit, which first ships in core 0.2.
     # custom-filter snapping (snap_to_network custom_filter) needs 0.3
-    "transitio>=0.3",
+    "transitio>=0.4",
     "uvicorn>=0.29",
 ]
 classifiers = [

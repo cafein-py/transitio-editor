@@ -5,6 +5,51 @@ import { api } from "./api.js";
 import * as mapBridge from "./map.js";
 import { forms, resetForms, store } from "./store.js";
 
+export async function checkNetworkAvailable() {
+  try {
+    const body = await api("GET", "/api/network");
+    store.network.available = Boolean(body.available);
+    // Both domains are visible by default: load the network eagerly so it
+    // shows alongside the feed from the start, not only after opening the tab.
+    if (store.network.available) await loadNetwork();
+  } catch (error) {
+    store.network.available = false;
+  }
+}
+
+export async function loadNetwork() {
+  const net = store.network;
+  if (net.loaded || net.loading || !net.available) return;
+  net.loading = true;
+  net.error = "";
+  try {
+    const [nodes, ways] = await Promise.all([
+      api("GET", "/api/network/nodes"),
+      api("GET", "/api/network/ways"),
+    ]);
+    await mapBridge.mapReady; // sources exist before we set their data
+    mapBridge.setNetworkData(nodes, ways);
+    net.nodeCount = nodes.features.length;
+    net.wayCount = ways.features.length;
+    net.loaded = true;
+    mapBridge.setNetworkVisible(net.visible);
+  } catch (error) {
+    net.error = error.message;
+  } finally {
+    net.loading = false;
+  }
+}
+
+export function toggleNetworkVisible() {
+  store.network.visible = !store.network.visible;
+  mapBridge.setNetworkVisible(store.network.visible);
+}
+
+export function toggleFeedVisible() {
+  store.feedVisible = !store.feedVisible;
+  mapBridge.setFeedVisible(store.feedVisible);
+}
+
 export function wrap(action) {
   return async (...args) => {
     try {
