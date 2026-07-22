@@ -3,7 +3,7 @@
 // the status line and marks the validation report stale.
 import { api } from "./api.js";
 import * as mapBridge from "./map.js";
-import { forms, store } from "./store.js";
+import { forms, resetForms, store } from "./store.js";
 
 export function wrap(action) {
   return async (...args) => {
@@ -157,6 +157,92 @@ export const shiftTrip = wrap(async () => {
   });
   await loadTrip(store.trip.trip_id);
 });
+
+export async function loadCatalogue() {
+  try {
+    const body = await api("GET", "/api/catalogue");
+    store.catalogue = body.feeds;
+    store.currentFeedId = body.current;
+  } catch (error) {
+    store.status = error.message;
+  }
+}
+
+export async function addFeed() {
+  const path = store.newFeedPath.trim();
+  if (!path) return;
+  try {
+    await api("POST", "/api/catalogue", { path });
+    store.newFeedPath = "";
+    await loadCatalogue();
+    await mapBridge.refreshAll(true);
+    store.status = "";
+  } catch (error) {
+    store.status = error.message;
+  }
+}
+
+// Interaction state (selection, drafts, timetable, report) is scoped to
+// the current feed; wipe it when the edit target changes so later actions
+// can't target entities from the previous feed.
+function resetFeedScopedState() {
+  setMode("select"); // also clears movingStop and the draw preview
+  store.inspector = null;
+  store.tripStops.length = 0;
+  store.tripPicking = false;
+  store.trip = null;
+  store.timetableRoute = "";
+  store.routeTrips = [];
+  store.routes = [];
+  store.report = null;
+  store.reportStale = false;
+  store.saveResult = null;
+  resetForms();
+  mapBridge.clearHighlight();
+}
+
+export async function setCurrentFeed(feed) {
+  try {
+    const body = await api("PUT", "/api/catalogue/current", {
+      feed_id: feed.feed_id,
+    });
+    resetFeedScopedState();
+    // Reflect the committed switch locally so the UI stays consistent even
+    // if the follow-up reload fails; loadCatalogue then refreshes the rest.
+    store.currentFeedId = body.current;
+    for (const entry of store.catalogue) {
+      entry.current = entry.feed_id === body.current;
+    }
+    await loadCatalogue();
+    await mapBridge.refreshSummary();
+  } catch (error) {
+    store.status = error.message;
+  }
+}
+
+export async function toggleFeedActive(feed) {
+  try {
+    await api("PATCH", `/api/catalogue/${encodeURIComponent(feed.feed_id)}`, {
+      active: !feed.active,
+    });
+    await loadCatalogue();
+    await mapBridge.refreshAll(false);
+  } catch (error) {
+    store.status = error.message;
+  }
+}
+
+export async function removeFeed(feed) {
+  try {
+    await api("DELETE", `/api/catalogue/${encodeURIComponent(feed.feed_id)}`);
+    // Removing the current feed reassigns current, so drop its state too.
+    if (feed.current) resetFeedScopedState();
+    await loadCatalogue();
+    await mapBridge.refreshAll(false);
+  } catch (error) {
+    store.status = error.message;
+  }
+}
 
 export async function saveFeed() {
   store.saving = true;
