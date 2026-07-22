@@ -42,7 +42,12 @@ async function refreshSummary() {
   const summary = await api("GET", "/api/feed");
   store.source = summary.source;
   store.tables = summary.tables;
+  store.currentFeedId = summary.currentFeedId ?? null;
   store.snapAvailable = Boolean(summary.snapAvailable);
+  // Keep the current feed's catalogue counts in step with its table sizes
+  // so the Catalogue tab doesn't show stale counts after a mutation.
+  const entry = store.catalogue.find((f) => f.feed_id === store.currentFeedId);
+  if (entry) entry.tables = summary.tables;
 }
 export { refreshSummary };
 
@@ -72,12 +77,15 @@ export async function refreshAll(fit) {
 }
 
 export function setHighlight(stopIds, shapeIds) {
-  map.setFilter("stops-highlight", ["in", ["get", "stop_id"], ["literal", stopIds]]);
-  map.setFilter("shapes-highlight", [
-    "in",
-    ["get", "shape_id"],
-    ["literal", shapeIds],
-  ]);
+  // A report is for the current feed; entity IDs repeat across active
+  // feeds, so scope the highlight to the current feed's features.
+  const feedId = store.currentFeedId;
+  const scoped = (idKey, ids) => {
+    const match = ["in", ["get", idKey], ["literal", ids]];
+    return feedId ? ["all", ["==", ["get", "feed_id"], feedId], match] : match;
+  };
+  map.setFilter("stops-highlight", scoped("stop_id", stopIds));
+  map.setFilter("shapes-highlight", scoped("shape_id", shapeIds));
   store.highlightActive = stopIds.length > 0 || shapeIds.length > 0;
 }
 
@@ -95,7 +103,10 @@ export function highlightContext(context) {
   setHighlight(stopIds, shapeIds);
   if (stopIds.length && lastStops) {
     const hit = lastStops.features.find(
-      (feature) => feature.properties.stop_id === stopIds[0],
+      (feature) =>
+        feature.properties.stop_id === stopIds[0] &&
+        (!store.currentFeedId ||
+          feature.properties.feed_id === store.currentFeedId),
     );
     if (hit) {
       map.flyTo({ center: hit.geometry.coordinates, zoom: 15 });
@@ -184,7 +195,11 @@ export function createMap() {
       id: "shapes",
       type: "line",
       source: "shapes",
-      paint: { "line-color": "#35507a", "line-width": 3, "line-opacity": 0.8 },
+      paint: {
+        "line-color": ["coalesce", ["get", "feed_color"], "#35507a"],
+        "line-width": 3,
+        "line-opacity": 0.8,
+      },
     });
     map.addLayer({
       id: "preview",
@@ -205,7 +220,7 @@ export function createMap() {
       source: "stops",
       paint: {
         "circle-radius": 6,
-        "circle-color": "#e67e22",
+        "circle-color": ["coalesce", ["get", "feed_color"], "#e67e22"],
         "circle-stroke-color": "#fff",
         "circle-stroke-width": 1.5,
       },
@@ -225,7 +240,22 @@ export function createMap() {
 
     map.on("click", "stops", (event) => {
       if (store.movingStop || store.mode !== "select") return;
-      const properties = event.features[0].properties;
+      // Co-located stops from several active feeds can share one click;
+      // prefer the current feed's stop so it stays editable under an
+      // overlay. Edits target the current feed; others are context only.
+      let properties = null;
+      if (store.currentFeedId) {
+        const own = event.features.find(
+          (feature) => feature.properties.feed_id === store.currentFeedId,
+        );
+        if (own) properties = own.properties;
+      }
+      if (!properties) properties = event.features[0].properties;
+      if (store.currentFeedId && properties.feed_id !== store.currentFeedId) {
+        store.status = "that stop belongs to another feed; make it current to edit it";
+        event.preventDefault();
+        return;
+      }
       if (store.tripPicking) {
         store.tripStops.push({
           stopId: properties.stop_id,

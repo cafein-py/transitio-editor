@@ -12,6 +12,9 @@ export const store = reactive({
   activeTab: "edit",
   source: null,
   tables: {},
+  catalogue: [], // [{ feed_id, name, active, color, current, source, tables }]
+  currentFeedId: null,
+  newFeedPath: "",
   snapAvailable: false,
   mode: "select",
   snapOn: true,
@@ -33,7 +36,7 @@ export const store = reactive({
   status: "",
 });
 
-export const forms = reactive({
+const defaultForms = () => ({
   route: { route_id: "", route_short_name: "", route_type: 3, agency_id: "" },
   trip: {
     route_id: "",
@@ -57,3 +60,14 @@ export const forms = reactive({
     end_date: "20261231",
   },
 });
+
+export const forms = reactive(defaultForms());
+
+// Form drafts reference feed-scoped ids; reset them to defaults when the
+// edit target changes so stale ids can't be submitted to another feed.
+export function resetForms() {
+  const defaults = defaultForms();
+  for (const key of Object.keys(defaults)) {
+    Object.assign(forms[key], defaults[key]);
+  }
+}
