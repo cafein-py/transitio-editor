@@ -876,3 +876,169 @@ def test_network_size_guard_returns_413(editor):
         )
     )
     assert client.get("/api/network/ways").status_code == 413
+
+
+def test_network_add_and_delete_node(editor):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    added = client.post(
+        "/api/network/nodes",
+        json={"lon": 26.94, "lat": 60.52, "tags": {"barrier": "gate"}},
+    )
+    assert added.status_code == 200
+    node_id = added.json()["id"]
+    assert node_id < 0  # provisional negative id
+
+    def node_ids():
+        features = client.get("/api/network/nodes").json()["features"]
+        return {f["properties"]["id"] for f in features}
+
+    assert node_id in node_ids()
+    assert client.delete(f"/api/network/nodes/{node_id}").status_code == 200
+    assert node_id not in node_ids()
+
+
+def _first_network_node(client):
+    return client.get("/api/network/nodes").json()["features"][0]["properties"]["id"]
+
+
+def test_network_move_node(editor):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    node_id = _first_network_node(client)
+    assert (
+        client.patch(
+            f"/api/network/nodes/{node_id}", json={"lon": 26.9401, "lat": 60.5201}
+        ).status_code
+        == 200
+    )
+    moved = next(
+        f
+        for f in client.get("/api/network/nodes").json()["features"]
+        if f["properties"]["id"] == node_id
+    )
+    lon, lat = moved["geometry"]["coordinates"]
+    assert abs(lon - 26.9401) < 1e-6 and abs(lat - 60.5201) < 1e-6
+
+
+def test_network_retag_node(editor):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    node_id = _first_network_node(client)
+    assert (
+        client.patch(
+            f"/api/network/nodes/{node_id}", json={"tags": {"highway": "crossing"}}
+        ).status_code
+        == 200
+    )
+    feature = next(
+        f
+        for f in client.get("/api/network/nodes").json()["features"]
+        if f["properties"]["id"] == node_id
+    )
+    assert feature["properties"].get("highway") == "crossing"
+
+
+def test_network_reset_discards_edits(editor):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    node_id = client.post(
+        "/api/network/nodes", json={"lon": 26.94, "lat": 60.52}
+    ).json()["id"]
+    assert client.post("/api/network/reset").status_code == 200
+    features = client.get("/api/network/nodes").json()["features"]
+    assert node_id not in {f["properties"]["id"] for f in features}
+
+
+def test_network_node_errors(editor):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    assert client.delete("/api/network/nodes/999999999").status_code == 404
+    assert (
+        client.patch(
+            "/api/network/nodes/999999999", json={"lon": 26.9, "lat": 60.5}
+        ).status_code
+        == 404
+    )
+    assert client.patch("/api/network/nodes/nope", json={"tags": {}}).status_code == 422
+    node_id = _first_network_node(client)
+    assert (
+        client.patch(
+            f"/api/network/nodes/{node_id}", json={"tags": {"id": "5"}}
+        ).status_code
+        == 422  # reserved column rejected
+    )
+
+
+def test_network_node_validation(editor):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    # malformed / missing coordinates are 422, not 500
+    assert client.post("/api/network/nodes", json={"lat": 60.5}).status_code == 422
+    assert (
+        client.post("/api/network/nodes", json={"lon": "x", "lat": 60.5}).status_code
+        == 422
+    )
+    # a falsey non-object 'tags' is rejected, not silently dropped
+    assert (
+        client.post(
+            "/api/network/nodes", json={"lon": 26.9, "lat": 60.5, "tags": []}
+        ).status_code
+        == 422
+    )
+    node_id = _first_network_node(client)
+    # a one-sided coordinate is rejected
+    assert (
+        client.patch(f"/api/network/nodes/{node_id}", json={"lon": 26.9}).status_code
+        == 422
+    )
+    # a valid move combined with an invalid tag is atomic: the node stays put
+    before = next(
+        f
+        for f in client.get("/api/network/nodes").json()["features"]
+        if f["properties"]["id"] == node_id
+    )
+    response = client.patch(
+        f"/api/network/nodes/{node_id}",
+        json={"lon": 26.9999, "lat": 60.5999, "tags": {"id": "5"}},
+    )
+    assert response.status_code == 422
+    after = next(
+        f
+        for f in client.get("/api/network/nodes").json()["features"]
+        if f["properties"]["id"] == node_id
+    )
+    assert after["geometry"]["coordinates"] == before["geometry"]["coordinates"]
+
+
+def test_network_coord_range_and_tag_values(editor):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    # out-of-range coordinates are rejected
+    assert (
+        client.post("/api/network/nodes", json={"lon": 999, "lat": 60.5}).status_code
+        == 422
+    )
+    assert (
+        client.post("/api/network/nodes", json={"lon": 26.9, "lat": 120}).status_code
+        == 422
+    )
+    # a non-string tag value is rejected (no "None"/repr coercion)
+    assert (
+        client.post(
+            "/api/network/nodes", json={"lon": 26.9, "lat": 60.5, "tags": {"k": None}}
+        ).status_code
+        == 422
+    )
+
+
+def test_network_features_snapshot(editor):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    body = client.get("/api/network/features").json()
+    assert body["nodes"]["type"] == "FeatureCollection"
+    assert body["ways"]["type"] == "FeatureCollection"
+    assert len(body["nodes"]["features"]) > 0 and len(body["ways"]["features"]) > 0
+
+
+def test_network_huge_int_coord_is_422(editor):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    # a legal JSON integer beyond float range must not 500
+    assert (
+        client.post(
+            "/api/network/nodes", json={"lon": 10**400, "lat": 60.5}
+        ).status_code
+        == 422
+    )

@@ -800,4 +800,105 @@ def create_app(
     def network_summary():
         return {"available": osm_pbf is not None}
 
+    def _network_node_id(raw):
+        try:
+            return int(raw)  # provisional nodes carry negative ids
+        except (TypeError, ValueError):
+            raise HTTPException(422, "node id must be an integer") from None
+
+    def _network_tags(payload):
+        tags = payload.get("tags")
+        if tags is None:
+            return {}
+        if not isinstance(tags, dict):
+            raise HTTPException(422, "'tags' must be an object")
+        clean = {}
+        for key, value in tags.items():
+            if not isinstance(value, str):
+                raise HTTPException(422, f"tag '{key}' value must be a string")
+            clean[str(key)] = value
+        return clean
+
+    def _network_coord(payload, key):
+        if key not in payload:
+            raise HTTPException(422, f"missing '{key}'")
+        try:
+            return _finite(payload[key], key)
+        except (TypeError, ValueError, OverflowError) as error:
+            raise HTTPException(422, str(error) or "invalid coordinate") from None
+
+    def _network_lonlat(payload):
+        lon = _network_coord(payload, "lon")
+        lat = _network_coord(payload, "lat")
+        if not (-180 <= lon <= 180 and -90 <= lat <= 90):
+            raise HTTPException(422, "coordinates out of WGS84 range")
+        return lon, lat
+
+    def _edit_network(action):
+        try:
+            return action()
+        except ValueError as error:
+            message = str(error)
+            status = 404 if message.startswith("no ") else 422
+            raise HTTPException(status, message) from None
+
+    @app.post("/api/network/nodes")
+    def network_add_node(payload: dict = Body(...)):
+        lon, lat = _network_lonlat(payload)
+        tags = _network_tags(payload)
+        with lock:
+            editor = get_osm_editor()
+            node_id = _edit_network(lambda: editor.add_node(lon, lat, **tags))
+        return {"id": node_id}
+
+    @app.patch("/api/network/nodes/{node_id}")
+    def network_update_node(node_id: str, payload: dict = Body(...)):
+        target = _network_node_id(node_id)
+        # Validate everything before touching the editor so a bad tag can't
+        # leave a half-applied move.
+        if ("lon" in payload) != ("lat" in payload):
+            raise HTTPException(422, "a move needs both 'lon' and 'lat'")
+        move = _network_lonlat(payload) if "lon" in payload else None
+        tags = _network_tags(payload)
+        with lock:
+            editor = get_osm_editor()
+            # Tags first (they carry the reserved-key check); a failure here
+            # returns before the move, keeping the PATCH atomic.
+            if tags:
+                _edit_network(lambda: editor.retag_node(target, **tags))
+            if move is not None:
+                _edit_network(lambda: editor.move_node(target, *move))
+        return {"ok": True}
+
+    @app.delete("/api/network/nodes/{node_id}")
+    def network_delete_node(node_id: str):
+        target = _network_node_id(node_id)
+        with lock:
+            editor = get_osm_editor()
+            _edit_network(lambda: editor.delete_node(target))
+        return {"ok": True}
+
+    @app.post("/api/network/reset")
+    def network_reset():
+        with lock:
+            previous = osm_state["editor"]
+            osm_state["editor"] = None
+            try:
+                get_osm_editor()  # reload now so a bad source fails here
+            except HTTPException:
+                osm_state["editor"] = previous  # keep the working editor
+                raise
+        return {"ok": True}
+
+    @app.get("/api/network/features")
+    def network_features_snapshot():
+        # Nodes and ways from one locked read, so the client never renders a
+        # mix of two editor generations.
+        with lock:
+            editor = get_osm_editor()
+            return {
+                "nodes": _network_features(editor.nodes),
+                "ways": _network_features(editor.ways),
+            }
+
     return app
