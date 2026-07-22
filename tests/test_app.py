@@ -829,3 +829,50 @@ def test_download_failure_returns_502(editor):
         client.post("/api/catalogue/download", json={"feed_id": "mdb-1"}).status_code
         == 502
     )
+
+
+def _osm_pbf():
+    pytest.importorskip("pyrosm")
+    from pyrosm import get_data
+
+    return get_data("test_pbf")
+
+
+def test_network_available_flag(editor):
+    assert TestClient(create_app(editor)).get("/api/network").json() == {
+        "available": False
+    }
+    with_pbf = TestClient(create_app(editor, osm_pbf="fake.osm.pbf")).get(
+        "/api/network"
+    )
+    assert with_pbf.json() == {"available": True}
+
+
+def test_network_nodes_and_ways_geojson(editor):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+
+    nodes = client.get("/api/network/nodes").json()
+    assert nodes["type"] == "FeatureCollection" and len(nodes["features"]) > 0
+    node = nodes["features"][0]
+    assert node["geometry"]["type"] == "Point" and "id" in node["properties"]
+
+    ways = client.get("/api/network/ways").json()
+    assert len(ways["features"]) > 0
+    way = ways["features"][0]
+    assert way["geometry"]["type"] in ("LineString", "MultiLineString")
+    assert "id" in way["properties"] and "nodes" in way["properties"]
+
+
+def test_network_not_loaded_returns_409(editor):
+    client = TestClient(create_app(editor))  # no osm_pbf
+    assert client.get("/api/network/nodes").status_code == 409
+    assert client.get("/api/network/ways").status_code == 409
+
+
+def test_network_size_guard_returns_413(editor):
+    client = TestClient(
+        create_app(
+            editor, osm_pbf=_osm_pbf(), network_type="driving", max_network_ways=1
+        )
+    )
+    assert client.get("/api/network/ways").status_code == 413

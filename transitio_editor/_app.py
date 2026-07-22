@@ -2,11 +2,42 @@
 
 from __future__ import annotations
 
+import math
 import os
 
 
 def _geojson_feature(geometry_mapping, properties):
     return {"type": "Feature", "geometry": geometry_mapping, "properties": properties}
+
+
+def _json_value(value):
+    """Coerce a GeoDataFrame cell to a JSON-serializable value, or ``None``."""
+    if isinstance(value, float) and math.isnan(value):
+        return None
+    if isinstance(value, list):
+        return [item.item() if hasattr(item, "item") else item for item in value]
+    if hasattr(value, "item"):  # numpy scalar
+        return value.item()
+    return value
+
+
+def _network_features(frame):
+    """A GeoJSON FeatureCollection of an OsmEditor nodes/ways frame."""
+    geometry_name = frame.geometry.name
+    features = []
+    for _, row in frame.iterrows():
+        geometry = row[geometry_name]
+        if geometry is None:
+            continue
+        properties = {}
+        for key, value in row.items():
+            if key == geometry_name:
+                continue
+            clean = _json_value(value)
+            if clean is not None:
+                properties[key] = clean
+        features.append(_geojson_feature(geometry.__geo_interface__, properties))
+    return {"type": "FeatureCollection", "features": features}
 
 
 def create_app(
@@ -15,6 +46,8 @@ def create_app(
     osm_pbf=None,
     network_type="driving",
     snap_custom_filter=None,
+    network_filter=None,
+    max_network_ways=50000,
     allowed_hosts=None,
     catalog_factory=None,
 ):
@@ -43,6 +76,14 @@ def create_app(
         Default pyrosm Overpass-style tag filter for snapping (e.g.
         ``{"railway": ["tram"]}``); a per-request ``custom_filter``
         overrides it. See :func:`~transitio.edit.snap_to_network`.
+    network_filter : dict, optional
+        pyrosm Overpass-style tag filter selecting the editable OSM
+        network served at ``GET /api/network/*`` (from ``osm_pbf``);
+        defaults to all highways plus tram/rail. See
+        :class:`~transitio.edit.OsmEditor`.
+    max_network_ways : int, default 50000
+        Refuse to serve an OSM network with more ways than this (guards
+        the browser); ``0`` disables the cap.
     allowed_hosts : list of str, optional
         Accepted ``Host`` header values (DNS-rebinding guard); defaults
         to the loopback names.
@@ -66,7 +107,6 @@ def create_app(
 
     from transitio.exceptions import InvalidFeedError
 
-    import math
     import threading
 
     from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -144,6 +184,30 @@ def create_app(
 
                 catalog["client"] = MobilityDatabase()
         return catalog["client"]
+
+    # The OSM network is loaded once, on first /api/network access, from the
+    # same extract as snapping.
+    osm_state = {"editor": None}
+
+    def get_osm_editor():
+        if osm_pbf is None:
+            raise HTTPException(409, "no OSM network loaded (start with --osm-pbf)")
+        if osm_state["editor"] is None:
+            from transitio.edit import OsmEditor
+
+            try:
+                loaded = OsmEditor(os.fspath(osm_pbf), custom_filter=network_filter)
+            except Exception as error:  # noqa: B902
+                raise HTTPException(422, f"cannot load OSM network: {error}") from None
+            way_count = len(loaded.ways)
+            if max_network_ways and way_count > max_network_ways:
+                raise HTTPException(
+                    413,
+                    f"OSM network has {way_count} ways, over the "
+                    f"{max_network_ways} limit (raise --max-network-ways)",
+                )
+            osm_state["editor"] = loaded
+        return osm_state["editor"]
 
     def _finite(value, field):
         number = float(value)
@@ -721,5 +785,19 @@ def create_app(
             )
             entry.active = activate
             return entry_dict(entry, registry)
+
+    @app.get("/api/network/nodes")
+    def network_nodes():
+        with lock:
+            return _network_features(get_osm_editor().nodes)
+
+    @app.get("/api/network/ways")
+    def network_ways():
+        with lock:
+            return _network_features(get_osm_editor().ways)
+
+    @app.get("/api/network")
+    def network_summary():
+        return {"available": osm_pbf is not None}
 
     return app

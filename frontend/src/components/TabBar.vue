@@ -8,6 +8,12 @@ import { store } from "../store.js";
       Edit
     </button>
     <button
+      :class="{ active: store.activeTab === 'network' }"
+      @click="store.activeTab = 'network'"
+    >
+      Network
+    </button>
+    <button
       :class="{ active: store.activeTab === 'catalogue' }"
       @click="store.activeTab = 'catalogue'"
     >
