@@ -5,15 +5,18 @@ import { networkTags } from "../network.js";
 import {
   acquireOsm,
   cancelAcquire,
+  clearAoi,
   cancelDrawWay,
   deleteNetworkNode,
   deleteNetworkWay,
   finishDrawWay,
   loadNetwork,
   resetNetwork,
+  resolveOsmByDrawn,
   resolveOsmByPlace,
   resolveOsmByView,
   retagNetworkNode,
+  startAoiDraw,
   saveNetwork,
   retagNetworkWay,
   setNetworkMode,
@@ -92,6 +95,27 @@ const savePath = ref("edited.osm.pbf");
       >
         Use current map view
       </button>
+      <div class="mode-row">
+        <button
+          :disabled="
+            store.network.acquire.resolving || store.network.acquire.downloading
+          "
+          @click="startAoiDraw"
+        >
+          {{ store.aoiDrawing ? "drag on the map…" : "Draw area" }}
+        </button>
+        <button
+          :disabled="
+            !store.aoi ||
+            store.network.acquire.resolving ||
+            store.network.acquire.downloading
+          "
+          @click="resolveOsmByDrawn"
+        >
+          Use drawn area
+        </button>
+        <button v-if="store.aoi" @click="clearAoi">Clear</button>
+      </div>
       <p v-if="store.network.acquire.resolving" class="hint">resolving…</p>
       <p v-if="store.network.acquire.error" class="hint net-error">
         {{ store.network.acquire.error }}
@@ -109,7 +133,12 @@ const savePath = ref("edited.osm.pbf");
           >
             {{ store.network.acquire.downloading ? "downloading…" : "Download" }}
           </button>
-          <button @click="cancelAcquire">Cancel</button>
+          <button
+            :disabled="store.network.acquire.downloading"
+            @click="cancelAcquire"
+          >
+            Cancel
+          </button>
         </div>
       </div>
     </div>

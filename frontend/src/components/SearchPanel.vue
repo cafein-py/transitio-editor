@@ -1,8 +1,27 @@
 <script setup>
-import { computed } from "vue";
+import { computed, watch } from "vue";
 import { store } from "../store.js";
 import { feedLocation, safeHttpUrl, sortFeeds } from "../search.js";
-import { downloadFeed, runSearch } from "../actions.js";
+import {
+  clearAoi,
+  downloadFeed,
+  runSearch,
+  startAoiDraw,
+} from "../actions.js";
+
+function drawArea() {
+  store.search.aoiMode = "drawn"; // drawing implies searching that area
+  startAoiDraw();
+}
+
+// With no area selected there is nothing to crop to, so keep the (disabled)
+// crop toggle off rather than stranding a download that can't proceed.
+watch(
+  () => store.search.aoiMode,
+  (mode) => {
+    if (mode === "none") store.search.cropToAoi = false;
+  },
+);
 
 const sortedResults = computed(() =>
   store.search.sortKey
@@ -40,9 +59,27 @@ function sortArrow(key) {
         <input type="checkbox" v-model="store.search.officialOnly" />
         official feeds only
       </label>
+      <div class="search-area">
+        <label>
+          area
+          <select v-model="store.search.aoiMode">
+            <option value="none">none</option>
+            <option value="map">current map view</option>
+            <option value="drawn">drawn area</option>
+          </select>
+        </label>
+        <button type="button" @click="drawArea">
+          {{ store.aoiDrawing ? "drag on the map…" : "Draw area" }}
+        </button>
+        <button type="button" v-if="store.aoi" @click="clearAoi">Clear</button>
+      </div>
       <label class="check">
-        <input type="checkbox" v-model="store.search.useMapBounds" />
-        limit to current map view
+        <input
+          type="checkbox"
+          v-model="store.search.cropToAoi"
+          :disabled="store.search.aoiMode === 'none'"
+        />
+        crop downloaded feed to area
       </label>
       <button class="primary" type="submit" :disabled="store.search.searching">
         {{ store.search.searching ? "Searching…" : "Search" }}
