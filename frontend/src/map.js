@@ -32,14 +32,24 @@ export function setCursor(kind) {
 // search. A viewport that crosses the antimeridian or spans the globe
 // can't be one WGS84 bbox, so skip the bounds filter rather than send a
 // clamped (wrong) one that silently drops the wrapped half.
+// MapLibre reports unwrapped longitudes on rendered world copies (e.g. 384°);
+// normalize to [-180, 180] so the backend's range check accepts them.
+function wrapLng(lng) {
+  return (((lng + 180) % 360) + 360) % 360 - 180;
+}
+
+const clampLat = (value) => Math.max(-90, Math.min(90, value));
+
 export function getViewportBbox() {
   if (!map) return null;
   const bounds = map.getBounds();
   const sw = bounds.getSouthWest();
   const ne = bounds.getNorthEast();
-  if (ne.lng - sw.lng >= 360 || sw.lng < -180 || ne.lng > 180) return null;
-  const clampLat = (value) => Math.max(-90, Math.min(90, value));
-  return [sw.lng, clampLat(sw.lat), ne.lng, clampLat(ne.lat)];
+  if (ne.lng - sw.lng >= 360) return null; // whole world: not a usable bbox
+  const minx = wrapLng(sw.lng);
+  const maxx = wrapLng(ne.lng);
+  if (minx >= maxx) return null; // straddles the antimeridian: not one bbox
+  return [minx, clampLat(sw.lat), maxx, clampLat(ne.lat)];
 }
 
 export function fitBbox(bbox) {
@@ -52,6 +62,66 @@ export function fitBbox(bbox) {
     ],
     { padding: 40, maxZoom: 15 },
   );
+}
+
+let aoiStart = null; // the first corner of a rectangle being dragged
+
+function aoiBox(a, b) {
+  const minx = Math.min(wrapLng(a.lng), wrapLng(b.lng));
+  const maxx = Math.max(wrapLng(a.lng), wrapLng(b.lng));
+  // An honest bbox has wrapped width equal to the drag's true (unwrapped)
+  // width; any difference means the drag crossed a wrap boundary and can't be
+  // one [minx, maxx] bbox — reject it (covers both wider and narrower cases).
+  if (Math.abs(maxx - minx - Math.abs(a.lng - b.lng)) > 1e-9) return null;
+  return [
+    minx,
+    clampLat(Math.min(a.lat, b.lat)),
+    maxx,
+    clampLat(Math.max(a.lat, b.lat)),
+  ];
+}
+
+function renderAoi(bbox) {
+  const source = map && map.getSource("aoi");
+  if (!source) return;
+  if (!bbox) {
+    source.setData({ type: "FeatureCollection", features: [] });
+    return;
+  }
+  const [minx, miny, maxx, maxy] = bbox;
+  source.setData({
+    type: "Feature",
+    geometry: {
+      type: "Polygon",
+      coordinates: [
+        [
+          [minx, miny],
+          [maxx, miny],
+          [maxx, maxy],
+          [minx, maxy],
+          [minx, miny],
+        ],
+      ],
+    },
+  });
+}
+
+export function startAoiDraw() {
+  if (!map) return;
+  store.aoiDrawing = true;
+  map.dragPan.disable(); // so the drag draws a box instead of panning
+  setCursor("crosshair");
+}
+
+export function clearAoi() {
+  store.aoi = null;
+  store.aoiDrawing = false;
+  aoiStart = null;
+  if (map) {
+    map.dragPan.enable();
+    setCursor("");
+  }
+  renderAoi(null);
 }
 
 function renderPreview() {
@@ -227,6 +297,24 @@ export function createMap() {
       type: "geojson",
       data: { type: "Feature", geometry: { type: "LineString", coordinates: [] } },
     });
+    map.addSource("aoi", {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+    // The drawn area sits at the bottom of the overlays so it never hides a
+    // feature; a translucent fill plus a dashed outline.
+    map.addLayer({
+      id: "aoi-fill",
+      type: "fill",
+      source: "aoi",
+      paint: { "fill-color": "#2d7", "fill-opacity": 0.12 },
+    });
+    map.addLayer({
+      id: "aoi-outline",
+      type: "line",
+      source: "aoi",
+      paint: { "line-color": "#1a9", "line-width": 2, "line-dasharray": [2, 1] },
+    });
     // OSM network under the GTFS layers: ways always, nodes only when zoomed
     // in (a whole-city node layer is too dense otherwise).
     map.addLayer({
@@ -307,6 +395,7 @@ export function createMap() {
     });
 
     map.on("click", "stops", (event) => {
+      if (store.aoiDrawing) return; // a rectangle gesture, not a selection
       if (store.movingStop || store.mode !== "select") return;
       // While editing the OSM network, stops are context: ignore them
       // silently (no preventDefault) so a network feature under the same
@@ -344,7 +433,7 @@ export function createMap() {
     // One handler over both network layers: two separate listeners would
     // both fire where a node sits on its way and race to set the selection.
     map.on("click", ["network-nodes", "network-ways"], (event) => {
-      if (event.defaultPrevented) return; // a stop on top already took it
+      if (event.defaultPrevented || store.aoiDrawing) return;
       // In add-node/move-node/draw-way mode a click on a road/node is a
       // placement, not a selection: fall through to the general handler.
       if (
@@ -375,11 +464,55 @@ export function createMap() {
     });
 
     map.on("click", (event) => {
-      if (event.defaultPrevented) return;
+      if (event.defaultPrevented || store.aoiDrawing) return;
       if (editTarget(store.activeTab) === "network") {
         handleNetworkClick(event);
       } else {
         handleMapClick(event);
+      }
+    });
+
+    // Rectangle-draw for an area of interest (dragPan is off while drawing).
+    map.on("mousedown", (event) => {
+      if (!store.aoiDrawing) return;
+      aoiStart = event.lngLat;
+      event.preventDefault();
+    });
+    map.on("mousemove", (event) => {
+      if (!store.aoiDrawing || !aoiStart) return;
+      renderAoi(aoiBox(aoiStart, event.lngLat));
+    });
+    map.on("mouseup", (event) => {
+      if (!store.aoiDrawing || !aoiStart) return;
+      const box = aoiBox(aoiStart, event.lngLat);
+      aoiStart = null;
+      map.dragPan.enable();
+      setCursor("");
+      // A zero-size or unrepresentable (antimeridian) box is not a selection.
+      if (!box || box[2] - box[0] < 1e-9 || box[3] - box[1] < 1e-9) {
+        store.aoi = null;
+        renderAoi(null);
+      } else {
+        store.aoi = box;
+        renderAoi(box);
+      }
+      // Stay in drawing state through the click MapLibre fires for a
+      // within-tolerance gesture, so that click can't leak to select/add.
+      setTimeout(() => {
+        store.aoiDrawing = false;
+      }, 0);
+    });
+
+    // Releasing the drag outside the canvas never reaches the map's mouseup;
+    // a window-level release then cancels the draw so it can't get stuck (the
+    // map handler nulls aoiStart first, so an in-canvas release no-ops here).
+    window.addEventListener("mouseup", () => {
+      if (store.aoiDrawing && aoiStart) {
+        aoiStart = null;
+        store.aoiDrawing = false;
+        map.dragPan.enable();
+        setCursor("");
+        renderAoi(store.aoi); // discard the in-progress box, keep the prior one
       }
     });
 

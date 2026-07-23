@@ -34,6 +34,8 @@ export const store = reactive({
   reportStale: false, // edits happened after the last validation
   highlightActive: false,
   feedVisible: true, // GTFS layer group visibility toggle
+  aoi: null, // a drawn [minx, miny, maxx, maxy] area, shared by OSM + GTFS
+  aoiDrawing: false, // a rectangle drag is in progress
   network: {
     available: false, // an OSM extract is loaded (--osm-pbf or acquired)
     loaded: false, // node/way GeoJSON fetched into the map
@@ -59,7 +61,8 @@ export const store = reactive({
     subdivision: "",
     municipality: "",
     officialOnly: false,
-    useMapBounds: false,
+    aoiMode: "none", // search-area source: "none" | "map" | "drawn"
+    cropToAoi: false, // crop a downloaded feed to the selected area
     limit: 50,
     results: [],
     searching: false,

@@ -185,10 +185,17 @@ export function resolveOsmByView() {
   }
 }
 
+export function resolveOsmByDrawn() {
+  if (store.aoi) resolveOsm(store.aoi);
+  else store.network.acquire.error = "draw an area on the map first";
+}
+
 export function cancelAcquire() {
   store.network.acquire.resolved = null;
   store.network.acquire.error = "";
 }
+
+export { startAoiDraw, clearAoi } from "./map.js";
 
 export async function acquireOsm(discardEdits = false) {
   const net = store.network;
@@ -509,15 +516,15 @@ export async function runSearch() {
     if (s.subdivision.trim()) params.set("subdivision", s.subdivision.trim());
     if (s.municipality.trim()) params.set("municipality", s.municipality.trim());
     if (s.officialOnly) params.set("official", "true");
-    if (s.useMapBounds) {
-      const bbox = mapBridge.getViewportBbox();
-      if (bbox) params.set("bbox", bbox.join(","));
-    }
+    const bbox = searchAoiBbox();
+    if (bbox) params.set("bbox", bbox.join(","));
     params.set("limit", String(s.limit));
     const body = await api("GET", `/api/search?${params.toString()}`);
     s.results = body.feeds;
     s.csvFallback = body.csv_fallback;
-    store.status = "";
+    // Don't silently drop a requested area filter.
+    store.status =
+      s.aoiMode !== "none" && !bbox ? "no area available — searched everywhere" : "";
   } catch (error) {
     s.results = [];
     store.status = error.message;
@@ -526,13 +533,27 @@ export async function runSearch() {
   }
 }
 
+// The bbox the Search tab's area selector points at, or null.
+function searchAoiBbox() {
+  if (store.search.aoiMode === "map") return mapBridge.getViewportBbox();
+  if (store.search.aoiMode === "drawn") return store.aoi;
+  return null;
+}
+
 export async function downloadFeed(feed) {
+  const body = { feed_id: feed.id, activate: true };
+  if (store.search.cropToAoi) {
+    const bbox = searchAoiBbox();
+    if (!bbox) {
+      // Don't silently download the full feed when a crop was asked for.
+      store.status = "select or draw an area to crop to, or uncheck crop";
+      return;
+    }
+    body.aoi = bbox;
+  }
   store.search.downloadingId = feed.id;
   try {
-    await api("POST", "/api/catalogue/download", {
-      feed_id: feed.id,
-      activate: true,
-    });
+    await api("POST", "/api/catalogue/download", body);
     await loadCatalogue();
     await mapBridge.refreshAll(true);
     store.activeTab = "catalogue";
