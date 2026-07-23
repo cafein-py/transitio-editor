@@ -35,7 +35,7 @@ export const store = reactive({
   highlightActive: false,
   feedVisible: true, // GTFS layer group visibility toggle
   network: {
-    available: false, // an OSM extract was loaded (--osm-pbf)
+    available: false, // an OSM extract is loaded (--osm-pbf or acquired)
     loaded: false, // node/way GeoJSON fetched into the map
     loading: false,
     visible: true, // layer visibility toggle
@@ -46,6 +46,13 @@ export const store = reactive({
     movingNode: null, // id of a node awaiting its new location
     draw: [], // vertices of a way being drawn: [{ vertex, coord }]
     error: "",
+    acquire: {
+      place: "", // place-name input for OSM extract acquisition
+      resolving: false,
+      resolved: null, // { bbox, url, name } awaiting confirmation
+      downloading: false,
+      error: "",
+    },
   },
   search: {
     country: "",

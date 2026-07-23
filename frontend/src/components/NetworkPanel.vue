@@ -3,12 +3,16 @@ import { computed, ref, watch } from "vue";
 import { store } from "../store.js";
 import { networkTags } from "../network.js";
 import {
+  acquireOsm,
+  cancelAcquire,
   cancelDrawWay,
   deleteNetworkNode,
   deleteNetworkWay,
   finishDrawWay,
   loadNetwork,
   resetNetwork,
+  resolveOsmByPlace,
+  resolveOsmByView,
   retagNetworkNode,
   saveNetwork,
   retagNetworkWay,
@@ -59,11 +63,66 @@ const savePath = ref("edited.osm.pbf");
 
 <template>
   <div class="panel network">
+    <div class="net-acquire">
+      <div class="net-acquire-title">Acquire OSM extract</div>
+      <div class="net-retag">
+        <input
+          v-model="store.network.acquire.place"
+          placeholder="place name (e.g. Helsinki)"
+          :disabled="store.network.acquire.downloading"
+          @keyup.enter="resolveOsmByPlace"
+        />
+        <button
+          :disabled="
+            !store.network.acquire.place.trim() ||
+            store.network.acquire.resolving ||
+            store.network.acquire.downloading
+          "
+          @click="resolveOsmByPlace"
+        >
+          Find
+        </button>
+      </div>
+      <button
+        class="mode"
+        :disabled="
+          store.network.acquire.resolving || store.network.acquire.downloading
+        "
+        @click="resolveOsmByView"
+      >
+        Use current map view
+      </button>
+      <p v-if="store.network.acquire.resolving" class="hint">resolving…</p>
+      <p v-if="store.network.acquire.error" class="hint net-error">
+        {{ store.network.acquire.error }}
+      </p>
+      <div v-if="store.network.acquire.resolved" class="net-resolved">
+        <p class="hint">
+          extract:
+          <strong>{{ store.network.acquire.resolved.name }}</strong> — downloads
+          and crops to the area.
+        </p>
+        <div class="mode-row">
+          <button
+            :disabled="store.network.acquire.downloading"
+            @click="acquireOsm(false)"
+          >
+            {{ store.network.acquire.downloading ? "downloading…" : "Download" }}
+          </button>
+          <button @click="cancelAcquire">Cancel</button>
+        </div>
+      </div>
+    </div>
+
     <p v-if="!store.network.available" class="hint">
-      No OSM network loaded. Start the editor with <code>--osm-pbf</code> to view
-      and edit the OSM network.
+      No OSM network loaded yet — acquire one above, or start the editor with
+      <code>--osm-pbf</code>.
     </p>
-    <template v-else>
+    <fieldset
+      v-else
+      class="net-edit"
+      :disabled="store.network.acquire.downloading"
+    >
       <label class="check">
         <input
           type="checkbox"
@@ -177,6 +236,6 @@ const savePath = ref("edited.osm.pbf");
       >
         Discard network edits
       </button>
-    </template>
+    </fieldset>
   </div>
 </template>
