@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## 0.5.0 — 2026-07-23
+
+### Added
+
+- View the OSM network (backend + Network tab): start the editor with
+  ``--osm-pbf`` to load a local ``.osm.pbf``; ``GET
+  /api/network/{nodes,ways,features}`` serve the routable network as
+  GeoJSON. A Network tab draws the network alongside the GTFS layers with
+  per-group visibility toggles and inspects a clicked node or way. The
+  network loads lazily on first access, behind a ``--max-network-ways``
+  size guard, with a broad ``--network-filter`` selecting the ways.
+- Edit network nodes: add, move, delete and retag nodes (``POST/PATCH/
+  DELETE /api/network/nodes``). New elements get a provisional negative id
+  that is their stable identity for the session.
+- Edit network ways: draw a new way (``POST /api/network/ways`` with
+  per-vertex descriptors) with connectivity — each drawn point reuses a
+  clicked existing node, splits a clicked way at a shared junction node,
+  or creates a new node — and retag (``PATCH``) or delete (``DELETE``) a
+  way. Vertices that meet at one point (a crossing, a shared node) splice
+  a single node into every way involved. A Draw-way mode with a live
+  preview and a tag key/value, plus Move/Delete/retag on a selected
+  element.
+- Save the edited network and snap to it: ``POST /api/network/save``
+  writes the edited network to a chosen ``*.osm.pbf`` via
+  ``OsmEditor.save`` (network-only, atomic) with a ``.provenance.json``
+  sidecar (source, edit counts, save time); it refuses a non-``.pbf``
+  path, a path resolving to the source extract, and 409s when no network
+  is loaded. Snapping (``POST /api/shapes/snap``) routes through the
+  edited network whenever one is loaded, so drawn shapes follow network
+  edits. A Save-network control in the Network panel.
+
 ## 0.4.0 — 2026-07-22
 
 ### Added
