@@ -22,16 +22,27 @@ def _json_value(value):
 
 
 def _write_sidecar(path, text):
-    """Write a provenance sidecar atomically, never following a symlink."""
-    tmp = path + ".part"
+    """Write a provenance sidecar atomically via a unique temp + rename.
 
-    def _no_follow(name, flags):
-        # O_NOFOLLOW is absent on Windows; degrade to a plain create there.
-        return os.open(name, flags | getattr(os, "O_NOFOLLOW", 0), 0o644)
+    ``mkstemp`` creates an unpredictably named file with exclusive-create
+    semantics in the target directory (so no pre-planted symlink or hard
+    link is followed), then ``os.replace`` atomically moves it onto the
+    destination, replacing any symlink there without following it.
+    """
+    import tempfile
 
-    with open(tmp, "w", opener=_no_follow) as handle:
-        handle.write(text)
-    os.replace(tmp, path)
+    directory = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".prov-", suffix=".part")
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _network_features(frame):
@@ -81,8 +92,10 @@ def create_app(
         mutations target the current feed, display aggregates the active
         feeds.
     osm_pbf : str or pathlib.Path, optional
-        OSM extract enabling ``POST /api/shapes/snap`` (requires the
-        ``transitio[snap]`` extra).
+        Initial OSM extract enabling the network endpoints and ``POST
+        /api/shapes/snap`` (requires the ``transitio[snap]`` extra). An
+        extract can also be acquired at runtime via ``POST
+        /api/osm/download``, which replaces the current source.
     network_type : str, default "driving"
         pyrosm network type for snapping.
     snap_custom_filter : dict, optional
@@ -199,27 +212,40 @@ def create_app(
         return catalog["client"]
 
     # The OSM network is loaded once, on first /api/network access, from the
-    # same extract as snapping.
-    osm_state = {"editor": None}
+    # current source extract (seeded by --osm-pbf, replaceable at runtime by an
+    # AOI download). The same source backs snapping.
+    osm_state = {
+        "editor": None,
+        "source": os.fspath(osm_pbf) if osm_pbf is not None else None,
+        "dirty": False,  # unsaved network edits since the last save/load
+    }
+
+    def _load_network(source):
+        """Load an OsmEditor from a source, enforcing the way-count guard."""
+        from transitio.edit import OsmEditor
+
+        try:
+            loaded = OsmEditor(os.fspath(source), custom_filter=network_filter)
+        except Exception as error:  # noqa: B902
+            raise HTTPException(422, f"cannot load OSM network: {error}") from None
+        way_count = len(loaded.ways)
+        if max_network_ways and way_count > max_network_ways:
+            raise HTTPException(
+                413,
+                f"OSM network has {way_count} ways, over the "
+                f"{max_network_ways} limit (raise --max-network-ways)",
+            )
+        return loaded
 
     def get_osm_editor():
-        if osm_pbf is None:
-            raise HTTPException(409, "no OSM network loaded (start with --osm-pbf)")
+        if osm_state["source"] is None:
+            raise HTTPException(
+                409,
+                "no OSM network loaded (start with --osm-pbf or acquire one via "
+                "POST /api/osm/download)",
+            )
         if osm_state["editor"] is None:
-            from transitio.edit import OsmEditor
-
-            try:
-                loaded = OsmEditor(os.fspath(osm_pbf), custom_filter=network_filter)
-            except Exception as error:  # noqa: B902
-                raise HTTPException(422, f"cannot load OSM network: {error}") from None
-            way_count = len(loaded.ways)
-            if max_network_ways and way_count > max_network_ways:
-                raise HTTPException(
-                    413,
-                    f"OSM network has {way_count} ways, over the "
-                    f"{max_network_ways} limit (raise --max-network-ways)",
-                )
-            osm_state["editor"] = loaded
+            osm_state["editor"] = _load_network(osm_state["source"])
         return osm_state["editor"]
 
     def _finite(value, field):
@@ -249,13 +275,13 @@ def create_app(
         if entry is None:
             return {
                 "source": None,
-                "snapAvailable": osm_pbf is not None,
+                "snapAvailable": osm_state["source"] is not None,
                 "tables": {},
                 "currentFeedId": None,
             }
         return {
             "source": entry.source,
-            "snapAvailable": osm_pbf is not None,
+            "snapAvailable": osm_state["source"] is not None,
             "tables": {
                 name: len(table) for name, table in sorted(entry.editor.tables.items())
             },
@@ -527,9 +553,11 @@ def create_app(
 
     @app.post("/api/shapes/snap")
     def snap(payload: dict = Body(...)):
-        if osm_pbf is None:
+        if osm_state["source"] is None:
             raise HTTPException(
-                409, "no OSM extract configured; start the GUI with an extract"
+                409,
+                "no OSM extract configured; start with an extract or acquire one "
+                "via POST /api/osm/download",
             )
         from transitio.edit import snap_to_network
 
@@ -551,11 +579,11 @@ def create_app(
                     )
                 elif custom_filter is not None:
                     line = snap_to_network(
-                        waypoints, osm_pbf, custom_filter=custom_filter
+                        waypoints, osm_state["source"], custom_filter=custom_filter
                     )
                 else:
                     line = snap_to_network(
-                        waypoints, osm_pbf, network_type=network_type
+                        waypoints, osm_state["source"], network_type=network_type
                     )
         except ImportError as error:
             raise HTTPException(501, str(error)) from None
@@ -821,7 +849,7 @@ def create_app(
 
     @app.get("/api/network")
     def network_summary():
-        return {"available": osm_pbf is not None}
+        return {"available": osm_state["source"] is not None}
 
     def _network_int_id(raw):
         # Provisional elements carry negative ids. Parse exactly (no float,
@@ -900,11 +928,15 @@ def create_app(
 
     def _edit_network(action):
         try:
-            return action()
+            result = action()
         except ValueError as error:
             message = str(error)
             status = 404 if message.startswith("no ") else 422
             raise HTTPException(status, message) from None
+        # Any successful mutation (add/move/delete/retag) marks the network
+        # dirty; in-place edits leave no trace in the editor's own id sets.
+        osm_state["dirty"] = True
+        return result
 
     @app.post("/api/network/nodes")
     def network_add_node(payload: dict = Body(...)):
@@ -956,20 +988,28 @@ def create_app(
         if "\x00" in path_value:
             raise HTTPException(422, "path must not contain NUL bytes")
         target = Path(path_value)
-        # A network-only save drops non-network features, so refuse to write
-        # over the source extract. An unresolvable path (e.g. a symlink loop)
-        # can't be the source; the save's own guard handles it.
-        if osm_pbf is not None:
-            try:
-                aliases_source = target.resolve() == Path(os.fspath(osm_pbf)).resolve()
-            except (OSError, RuntimeError, ValueError):  # loops, NUL byte, encoding
-                aliases_source = False
-            if aliases_source:
-                raise HTTPException(
-                    422,
-                    "refusing to overwrite the source extract; save to a new path",
-                )
         with lock:
+            # A network-only save drops non-network features, so refuse to
+            # write over the source extract. Read the source under the lock so
+            # a concurrent acquisition can't swap it mid-save. An unresolvable
+            # path (symlink loop, NUL byte) can't be the source.
+            source = osm_state["source"]
+            if source is not None:
+                source_path = Path(os.fspath(source))
+                try:
+                    aliases = target.resolve() == source_path.resolve()
+                    # A hard link resolves to a different path but the same
+                    # inode; catch that when the target already exists.
+                    if not aliases and target.exists() and source_path.exists():
+                        aliases = target.samefile(source_path)
+                except (OSError, RuntimeError, ValueError):
+                    aliases = False
+                if aliases:
+                    raise HTTPException(
+                        422,
+                        "refusing to overwrite the source extract; save to a new "
+                        "path",
+                    )
             editor = get_osm_editor()
             try:
                 editor.save(target)
@@ -982,7 +1022,7 @@ def create_app(
             # editor-produced extract must not read as fresh additions.
             provisional = getattr(editor, "_provisional", set())
             provenance = {
-                "source": os.fspath(osm_pbf) if osm_pbf else None,
+                "source": os.fspath(source) if source else None,
                 "added_nodes": int(editor.nodes["id"].isin(provisional).sum()),
                 "added_ways": int(editor.ways["id"].isin(provisional).sum()),
                 "saved_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -991,6 +1031,7 @@ def create_app(
                 os.fspath(target) + ".provenance.json",
                 json.dumps(provenance, indent=2),
             )
+            osm_state["dirty"] = False  # edits are now persisted
         return {"saved": True, "path": os.fspath(target)}
 
     @app.post("/api/network/reset")
@@ -1003,6 +1044,7 @@ def create_app(
             except HTTPException:
                 osm_state["editor"] = previous  # keep the working editor
                 raise
+            osm_state["dirty"] = False  # reloaded from source, edits discarded
         return {"ok": True}
 
     @app.get("/api/network/features")
@@ -1014,6 +1056,104 @@ def create_app(
             return {
                 "nodes": _network_features(editor.nodes),
                 "ways": _network_features(editor.ways),
+            }
+
+    def _acquire_bbox(bbox):
+        if not isinstance(bbox, list) or len(bbox) != 4:
+            raise HTTPException(422, "'bbox' must be [minx, miny, maxx, maxy]")
+        values = []
+        for value in bbox:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise HTTPException(422, "bbox values must be numbers")
+            try:
+                number = float(value)
+            except OverflowError:
+                raise HTTPException(422, "bbox value out of range") from None
+            if not math.isfinite(number):
+                raise HTTPException(422, "bbox values must be finite")
+            values.append(number)
+        minx, miny, maxx, maxy = values
+        if not (-180 <= minx <= 180 and -180 <= maxx <= 180):
+            raise HTTPException(422, "longitudes must be within [-180, 180]")
+        if not (-90 <= miny <= 90 and -90 <= maxy <= 90):
+            raise HTTPException(422, "latitudes must be within [-90, 90]")
+        if not (minx < maxx and miny < maxy):
+            raise HTTPException(422, "bbox must have positive area")
+        return (minx, miny, maxx, maxy)
+
+    def _extract_name(url):
+        # A readable name from a Geofabrik PBF URL, e.g.
+        # ".../europe/finland-latest.osm.pbf" -> "finland".
+        base = url.rsplit("/", 1)[-1]
+        for suffix in ("-latest.osm.pbf", ".osm.pbf", ".pbf"):
+            if base.endswith(suffix):
+                return base[: -len(suffix)]
+        return base
+
+    def _resolve_extract(aoi):
+        # Normalise the AOI and resolve the covering Geofabrik extract from
+        # pyrosm's bundled index — no download.
+        from transitio.osm._fetch import _as_geometry, _resolve_url
+
+        try:
+            geometry = _as_geometry(aoi)
+        except Exception as error:  # noqa: B902  (bad bbox, geocoder failures)
+            raise HTTPException(422, f"cannot resolve AOI: {error}") from None
+        try:
+            url = _resolve_url(geometry, update=False)
+        except Exception as error:  # noqa: B902  (ExtractNotFoundError, geocode)
+            raise HTTPException(422, f"no covering OSM extract: {error}") from None
+        return geometry, url
+
+    @app.post("/api/osm/resolve")
+    def osm_resolve(payload: dict = Body(...)):
+        aoi = payload.get("aoi")
+        if aoi is None:
+            raise HTTPException(422, "missing field 'aoi'")
+        geometry, url = _resolve_extract(aoi)
+        minx, miny, maxx, maxy = geometry.bounds
+        return {
+            "bbox": [minx, miny, maxx, maxy],
+            "url": url,
+            "name": _extract_name(url),
+        }
+
+    @app.post("/api/osm/download")
+    def osm_download(payload: dict = Body(...)):
+        url = payload.get("url")
+        if not isinstance(url, str) or not url:
+            raise HTTPException(422, "'url' must be the confirmed extract URL")
+        aoi = _acquire_bbox(payload.get("bbox"))
+        crop = payload.get("crop", True)
+        discard_edits = payload.get("discard_edits", False)
+        if not isinstance(crop, bool) or not isinstance(discard_edits, bool):
+            raise HTTPException(422, "'crop' and 'discard_edits' must be booleans")
+        with lock:
+            if osm_state["dirty"] and not discard_edits:
+                raise HTTPException(
+                    409, "unsaved network edits; save first or set discard_edits"
+                )
+            # The confirmed extract must still resolve now, so a place geocoded
+            # at resolve time can't download a different one.
+            _, resolved_url = _resolve_extract(aoi)
+            if resolved_url != url:
+                raise HTTPException(409, "extract changed — re-confirm")
+            import transitio.osm as osm
+
+            try:
+                path = osm.fetch_pbf(aoi, crop=crop)
+            except Exception as error:  # noqa: B902  (download/crop failures)
+                raise HTTPException(502, f"OSM download failed: {error}") from None
+            # Load + guard the candidate before swapping, so a bad download
+            # never replaces a working network.
+            loaded = _load_network(path)
+            osm_state["source"] = os.fspath(path)
+            osm_state["editor"] = loaded
+            osm_state["dirty"] = False  # a freshly loaded network has no edits
+            return {
+                "path": os.fspath(path),
+                "nodes": int(len(loaded.nodes)),
+                "ways": int(len(loaded.ways)),
             }
 
     _SNAP_TOLERANCE_M = 8.0  # metres: reuse an existing node / accept a split
