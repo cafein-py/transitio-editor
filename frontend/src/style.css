@@ -81,3 +81,5 @@ table.times input { width: 76px; padding: 3px; }
 .net-retag { display: flex; gap: 4px; margin-top: 6px; }
 .net-retag input { width: 40%; }
 .net-reset { margin-top: 10px; width: 100%; color: #a33; }
+.net-save { display: flex; gap: 4px; margin-top: 10px; }
+.net-save input { flex: 1; }

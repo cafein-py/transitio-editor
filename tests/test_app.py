@@ -1139,7 +1139,10 @@ def test_network_way_errors(editor):
     assert (
         client.post(
             "/api/network/ways",
-            json={"vertices": [{"node": 999999999}, {"lon": 26.9, "lat": 60.5}]},
+            json={
+                "vertices": [{"node": 999999999}, {"lon": 26.9, "lat": 60.5}],
+                "tags": {"highway": "footway"},
+            },
         ).status_code
         == 404  # unknown node reference
     )
@@ -1194,6 +1197,7 @@ def test_network_split_far_point_rejected(editor):
                 {"split_way": target["properties"]["id"], "lon": 10.0, "lat": 10.0},
                 {"lon": 10.001, "lat": 10.0},
             ],
+            "tags": {"highway": "footway"},
         },
     )
     assert new.status_code == 422  # the point is not on the way
@@ -1202,15 +1206,18 @@ def test_network_split_far_point_rejected(editor):
 def test_network_id_parsing_rejects_non_integers(editor):
     client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
     tail = {"lon": 26.9, "lat": 60.5}
+    tags = {"highway": "footway"}
     assert (
         client.post(
-            "/api/network/ways", json={"vertices": [{"node": 123.9}, tail]}
+            "/api/network/ways",
+            json={"vertices": [{"node": 123.9}, tail], "tags": tags},
         ).status_code
         == 422  # float id not truncated
     )
     assert (
         client.post(
-            "/api/network/ways", json={"vertices": [{"node": True}, tail]}
+            "/api/network/ways",
+            json={"vertices": [{"node": True}, tail], "tags": tags},
         ).status_code
         == 422  # bool id not coerced
     )
@@ -1316,3 +1323,272 @@ def test_network_tag_and_coord_edge_validation(editor):
         ).status_code
         == 422
     )
+
+
+def test_network_save_writes_readable_pbf(editor, tmp_path):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    out = tmp_path / "edited.osm.pbf"
+    response = client.post("/api/network/save", json={"path": str(out)})
+    assert response.status_code == 200 and response.json()["saved"] is True
+    assert out.exists()
+    from pyrosm import OSM
+
+    _, edges = OSM(str(out)).get_network("all", nodes=True)
+    assert len(edges) > 0  # a re-readable network
+
+
+def test_network_save_reflects_edits(editor, tmp_path):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    way_id = client.post(
+        "/api/network/ways",
+        json={
+            "vertices": [{"lon": 26.94, "lat": 60.52}, {"lon": 26.941, "lat": 60.521}],
+            "tags": {"highway": "footway"},
+        },
+    ).json()["id"]
+    out = tmp_path / "edited.osm.pbf"
+    client.post("/api/network/save", json={"path": str(out)})
+    from pyrosm import OSM
+
+    _, edges = OSM(str(out), keep_node_info=True).get_network("all", nodes=True)
+    assert way_id in set(edges["id"])  # the drawn way persisted
+
+
+def test_network_save_errors(editor):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    assert client.post("/api/network/save", json={}).status_code == 422
+    assert client.post("/api/network/save", json={"path": ""}).status_code == 422
+    no_network = TestClient(create_app(editor))  # no --osm-pbf
+    assert (
+        no_network.post("/api/network/save", json={"path": "/tmp/x.pbf"}).status_code
+        == 409
+    )
+
+
+def test_snap_routes_through_edited_network(editor):
+    pytest.importorskip("networkx")
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    # loading the network makes snapping go through the OsmEditor
+    nodes = client.get("/api/network/features").json()["nodes"]["features"]
+    a = nodes[0]["geometry"]["coordinates"]
+    b = nodes[5]["geometry"]["coordinates"]
+    snap = client.post(
+        "/api/shapes/snap", json={"waypoints": [[a[1], a[0]], [b[1], b[0]]]}
+    )
+    assert snap.status_code == 200
+    assert snap.json()["geometry"]["type"] == "LineString"
+
+
+def test_network_add_way_collapse_is_atomic(editor):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    before = len(client.get("/api/network/features").json()["nodes"]["features"])
+    response = client.post(
+        "/api/network/ways",
+        json={
+            "vertices": [
+                {"lon": 26.9500, "lat": 60.5200},
+                {"lon": 26.950001, "lat": 60.5200},
+            ]
+        },
+    )
+    assert response.status_code == 422
+    after = len(client.get("/api/network/features").json()["nodes"]["features"])
+    assert after == before  # nothing created before the collapse was detected
+
+
+def test_network_add_railway_way(editor):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    new = client.post(
+        "/api/network/ways",
+        json={
+            "vertices": [{"lon": 26.94, "lat": 60.52}, {"lon": 26.941, "lat": 60.521}],
+            "tags": {"railway": "tram"},  # not a highway
+        },
+    )
+    assert new.status_code == 200
+    assert (
+        _network_ways(client)[new.json()["id"]]["properties"].get("railway") == "tram"
+    )
+
+
+def test_network_save_refuses_source_and_bad_suffix(editor, tmp_path):
+    pbf = _osm_pbf()
+    client = TestClient(create_app(editor, osm_pbf=pbf, network_type="driving"))
+    assert client.post("/api/network/save", json={"path": str(pbf)}).status_code == 422
+    assert (
+        client.post(
+            "/api/network/save", json={"path": str(tmp_path / "x.txt")}
+        ).status_code
+        == 422
+    )
+
+
+def test_network_save_writes_provenance(editor, tmp_path):
+    import json
+
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    client.post(
+        "/api/network/ways",
+        json={
+            "vertices": [{"lon": 26.95, "lat": 60.52}, {"lon": 26.951, "lat": 60.521}],
+            "tags": {"highway": "path"},
+        },
+    )
+    out = tmp_path / "edited.osm.pbf"
+    client.post("/api/network/save", json={"path": str(out)})
+    sidecar = tmp_path / "edited.osm.pbf.provenance.json"
+    assert sidecar.exists()
+    data = json.loads(sidecar.read_text())
+    assert data["source"] and data["saved_at"]
+    assert data["added_ways"] == 1 and data["added_nodes"] == 2
+
+
+def test_network_add_way_rejects_untagged(editor):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    body = {"vertices": [{"lon": 26.95, "lat": 60.52}, {"lon": 26.951, "lat": 60.521}]}
+    assert client.post("/api/network/ways", json=body).status_code == 422
+    assert (
+        client.post("/api/network/ways", json={**body, "tags": {}}).status_code == 422
+    )
+
+
+def test_network_save_sidecar_does_not_follow_symlink(editor, tmp_path):
+    import json
+
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep me")
+    out = tmp_path / "edited.osm.pbf"
+    sidecar = tmp_path / "edited.osm.pbf.provenance.json"
+    sidecar.symlink_to(victim)  # a pre-existing sidecar symlink
+    client.post("/api/network/save", json={"path": str(out)})
+    assert victim.read_text() == "keep me"  # target untouched
+    assert not sidecar.is_symlink()  # replaced, not followed
+    assert json.loads(sidecar.read_text())["source"]
+
+
+def test_network_split_two_ways_at_one_point_keeps_both(editor):
+    # drawing across a crossing must split both ways, not collapse to one.
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    client.get("/api/network/features")  # load the network
+    w1 = client.post(
+        "/api/network/ways",
+        json={
+            "vertices": [{"lon": 26.95, "lat": 60.52}, {"lon": 26.952, "lat": 60.52}],
+            "tags": {"highway": "service"},
+        },
+    ).json()["id"]
+    w2 = client.post(
+        "/api/network/ways",
+        json={
+            "vertices": [
+                {"lon": 26.951, "lat": 60.519},
+                {"lon": 26.951, "lat": 60.521},
+            ],
+            "tags": {"highway": "service"},
+        },
+    ).json()["id"]
+    ways = _network_ways(client)
+    before1, before2 = ways[w1], ways[w2]
+    n1 = len(before1["properties"]["nodes"])
+    n2 = len(before2["properties"]["nodes"])
+    cross = {"lon": 26.951, "lat": 60.52}  # where w1 and w2 cross
+    # a path that passes through the crossing, clicking both ways there
+    drawn = client.post(
+        "/api/network/ways",
+        json={
+            "vertices": [
+                {"lon": 26.9505, "lat": 60.5205},
+                {"split_way": w1, **cross},
+                {"split_way": w2, **cross},
+                {"lon": 26.9515, "lat": 60.5195},
+            ],
+            "tags": {"highway": "footway"},
+        },
+    )
+    assert drawn.status_code == 200
+    ways = _network_ways(client)
+    w1_nodes = ways[w1]["properties"]["nodes"]
+    w2_nodes = ways[w2]["properties"]["nodes"]
+    assert len(w1_nodes) == n1 + 1  # w1 got a junction
+    assert len(w2_nodes) == n2 + 1  # w2 got one too
+    # the crossing is a single shared node, not colocated duplicates
+    (junction,) = set(w1_nodes) - set(before1["properties"]["nodes"])
+    assert junction in w2_nodes
+    assert junction in ways[drawn.json()["id"]]["properties"]["nodes"]
+
+
+def test_network_share_existing_node_across_two_ways(editor):
+    # one existing node clicked on two crossing ways must be spliced into both.
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    client.get("/api/network/features")  # load the network
+    shared = client.post(
+        "/api/network/nodes", json={"lon": 26.951, "lat": 60.52, "tags": {}}
+    ).json()["id"]
+    w1 = client.post(
+        "/api/network/ways",
+        json={
+            "vertices": [{"lon": 26.95, "lat": 60.52}, {"lon": 26.952, "lat": 60.52}],
+            "tags": {"highway": "service"},
+        },
+    ).json()["id"]
+    w2 = client.post(
+        "/api/network/ways",
+        json={
+            "vertices": [
+                {"lon": 26.951, "lat": 60.519},
+                {"lon": 26.951, "lat": 60.521},
+            ],
+            "tags": {"highway": "service"},
+        },
+    ).json()["id"]
+    at = {"lon": 26.951, "lat": 60.52}  # projects onto both ways, near `shared`
+    drawn = client.post(
+        "/api/network/ways",
+        json={
+            "vertices": [
+                {"lon": 26.9505, "lat": 60.5205},
+                {"split_way": w1, **at},
+                {"split_way": w2, **at},
+                {"lon": 26.9515, "lat": 60.5195},
+            ],
+            "tags": {"highway": "footway"},
+        },
+    )
+    assert drawn.status_code == 200
+    ways = _network_ways(client)
+    assert shared in ways[w1]["properties"]["nodes"]  # spliced into w1
+    assert shared in ways[w2]["properties"]["nodes"]  # and into w2, not just w1
+
+
+def test_network_save_rejects_nul_byte_path(editor):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    got = client.post("/api/network/save", json={"path": "x" + chr(0) + ".pbf"})
+    assert got.status_code == 422  # not an unhandled 500
+
+
+def test_snap_reflects_a_new_way(editor):
+    pytest.importorskip("networkx")
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    features = client.get("/api/network/features").json()  # load the network
+    # attach a new driving way to an existing network node so it joins the
+    # routable graph; its far end is a brand-new node absent from the source.
+    anchor = features["nodes"]["features"][0]["properties"]["id"]
+    a_lon, a_lat = features["nodes"]["features"][0]["geometry"]["coordinates"]
+    b_lon, b_lat = a_lon, a_lat + 0.001  # ~110 m away, a fresh node
+    client.post(
+        "/api/network/ways",
+        json={
+            "vertices": [{"node": anchor}, {"lon": b_lon, "lat": b_lat}],
+            "tags": {"highway": "residential"},
+        },
+    )
+    snap = client.post(
+        "/api/shapes/snap",
+        json={"waypoints": [[a_lat, a_lon], [b_lat, b_lon]]},
+    )
+    assert snap.status_code == 200
+    coords = snap.json()["geometry"]["coordinates"]  # [lon, lat]
+    # reaching the brand-new far node is only possible along the drawn way,
+    # i.e. against the edited network materialised for the snap.
+    assert abs(coords[-1][0] - b_lon) < 1e-6 and abs(coords[-1][1] - b_lat) < 1e-6
