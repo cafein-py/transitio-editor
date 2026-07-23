@@ -1592,3 +1592,164 @@ def test_snap_reflects_a_new_way(editor):
     # reaching the brand-new far node is only possible along the drawn way,
     # i.e. against the edited network materialised for the snap.
     assert abs(coords[-1][0] - b_lon) < 1e-6 and abs(coords[-1][1] - b_lat) < 1e-6
+
+
+_HELSINKI_BBOX = [24.9, 60.1, 25.0, 60.2]  # covered by the bundled extract index
+
+
+def test_osm_resolve_returns_extract(editor):
+    # resolution uses pyrosm's bundled index — no network needed.
+    client = TestClient(create_app(editor))
+    got = client.post("/api/osm/resolve", json={"aoi": _HELSINKI_BBOX})
+    assert got.status_code == 200
+    body = got.json()
+    assert body["url"].endswith(".osm.pbf") and body["name"]
+    assert len(body["bbox"]) == 4
+    assert client.post("/api/osm/resolve", json={}).status_code == 422
+    assert client.post("/api/osm/resolve", json={"aoi": [1, 2, 3]}).status_code == 422
+
+
+def _resolved(client):
+    return client.post("/api/osm/resolve", json={"aoi": _HELSINKI_BBOX}).json()
+
+
+def test_osm_download_sets_network_from_nothing(editor, monkeypatch):
+    # an app started without --osm-pbf gains a network via acquisition.
+    monkeypatch.setattr("transitio.osm.fetch_pbf", lambda aoi, *, crop=True: _osm_pbf())
+    client = TestClient(create_app(editor))  # no osm_pbf
+    assert client.get("/api/network").json() == {"available": False}
+    r = _resolved(client)
+    got = client.post("/api/osm/download", json={"bbox": r["bbox"], "url": r["url"]})
+    assert got.status_code == 200 and got.json()["ways"] > 0
+    assert client.get("/api/network").json() == {"available": True}
+    assert len(client.get("/api/network/features").json()["ways"]["features"]) > 0
+
+
+def test_osm_download_url_mismatch_409(editor, monkeypatch):
+    monkeypatch.setattr("transitio.osm.fetch_pbf", lambda aoi, *, crop=True: _osm_pbf())
+    client = TestClient(create_app(editor))
+    r = _resolved(client)
+    got = client.post(
+        "/api/osm/download", json={"bbox": r["bbox"], "url": "https://wrong/x.osm.pbf"}
+    )
+    assert got.status_code == 409  # extract changed — re-confirm
+
+
+def test_osm_download_rejects_dirty_network(editor, monkeypatch):
+    monkeypatch.setattr("transitio.osm.fetch_pbf", lambda aoi, *, crop=True: _osm_pbf())
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    client.post(  # make the loaded network dirty
+        "/api/network/nodes", json={"lon": 26.94, "lat": 60.52, "tags": {}}
+    )
+    r = _resolved(client)
+    blocked = client.post(
+        "/api/osm/download", json={"bbox": r["bbox"], "url": r["url"]}
+    )
+    assert blocked.status_code == 409  # unsaved edits
+    ok = client.post(
+        "/api/osm/download",
+        json={"bbox": r["bbox"], "url": r["url"], "discard_edits": True},
+    )
+    assert ok.status_code == 200
+
+
+def test_osm_download_retains_previous_on_failure(editor, monkeypatch):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    before = len(client.get("/api/network/features").json()["ways"]["features"])
+
+    def boom(aoi, *, crop=True):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr("transitio.osm.fetch_pbf", boom)
+    r = _resolved(client)
+    got = client.post("/api/osm/download", json={"bbox": r["bbox"], "url": r["url"]})
+    assert got.status_code == 502
+    # the working network is untouched
+    after = len(client.get("/api/network/features").json()["ways"]["features"])
+    assert after == before
+
+
+def test_osm_download_blocks_on_in_place_edit(editor, tmp_path, monkeypatch):
+    # a move/retag of an existing element leaves no provisional id or deletion,
+    # yet must still block acquisition; saving clears it.
+    monkeypatch.setattr("transitio.osm.fetch_pbf", lambda aoi, *, crop=True: _osm_pbf())
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    node_id = _first_network_node(client)
+    client.patch(f"/api/network/nodes/{node_id}", json={"lon": 26.9401, "lat": 60.5201})
+    r = _resolved(client)
+    blocked = client.post(
+        "/api/osm/download", json={"bbox": r["bbox"], "url": r["url"]}
+    )
+    assert blocked.status_code == 409
+    out = tmp_path / "saved.osm.pbf"
+    assert client.post("/api/network/save", json={"path": str(out)}).status_code == 200
+    ok = client.post("/api/osm/download", json={"bbox": r["bbox"], "url": r["url"]})
+    assert ok.status_code == 200  # dirty cleared by the save
+
+
+def _helsinki_pbf():
+    pytest.importorskip("pyrosm")
+    from pyrosm import get_data
+
+    return get_data("helsinki_pbf")  # ~2.5k ways, larger than test_pbf
+
+
+def test_osm_download_rejects_oversized_candidate(editor, monkeypatch):
+    # the small extract loads under the cap; a larger candidate is rejected and
+    # the working network stays intact and usable.
+    client = TestClient(
+        create_app(
+            editor,
+            osm_pbf=_osm_pbf(),
+            network_type="driving",
+            max_network_ways=1000,
+        )
+    )
+    before = len(client.get("/api/network/features").json()["ways"]["features"])
+    monkeypatch.setattr(
+        "transitio.osm.fetch_pbf", lambda aoi, *, crop=True: _helsinki_pbf()
+    )
+    r = _resolved(client)
+    got = client.post("/api/osm/download", json={"bbox": r["bbox"], "url": r["url"]})
+    assert got.status_code == 413
+    after = len(client.get("/api/network/features").json()["ways"]["features"])
+    assert after == before  # previous network intact
+
+
+def test_osm_download_rejects_non_bool_flags(editor):
+    client = TestClient(create_app(editor))
+    r = _resolved(client)
+    got = client.post(
+        "/api/osm/download",
+        json={"bbox": r["bbox"], "url": r["url"], "discard_edits": "false"},
+    )
+    assert got.status_code == 422  # a truthy string must not bypass the guard
+
+
+def test_osm_download_rejects_bad_bbox(editor):
+    client = TestClient(create_app(editor))
+    bad_boxes = [
+        [True, 60.1, 25.0, 60.2],  # boolean coordinate
+        [24.9, 60.1, 24.9, 60.2],  # zero area
+        [24.9, 60.1, 400.0, 60.2],  # longitude out of range
+        [10**400, 60.1, 25.0, 60.2],  # overflows float
+    ]
+    for bad in bad_boxes:
+        got = client.post(
+            "/api/osm/download", json={"bbox": bad, "url": "https://x/a.osm.pbf"}
+        )
+        assert got.status_code == 422, bad
+
+
+def test_osm_download_load_failure_retains_previous(editor, monkeypatch):
+    # a candidate that downloads but fails to load must not replace the network.
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    before = len(client.get("/api/network/features").json()["ways"]["features"])
+    monkeypatch.setattr(
+        "transitio.osm.fetch_pbf", lambda aoi, *, crop=True: "/no/such/file.osm.pbf"
+    )
+    r = _resolved(client)
+    got = client.post("/api/osm/download", json={"bbox": r["bbox"], "url": r["url"]})
+    assert got.status_code == 422  # candidate cannot load
+    after = len(client.get("/api/network/features").json()["ways"]["features"])
+    assert after == before  # previous network intact
