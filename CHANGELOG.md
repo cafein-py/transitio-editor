@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## 0.6.0 — 2026-07-23
+
+### Added
+
+- Acquire an OSM extract from the editor: `POST /api/osm/resolve` resolves the
+  smallest covering Geofabrik extract for an area (a place name or a bounding
+  box) from pyrosm's bundled index without downloading, and `POST
+  /api/osm/download` downloads and crops it via `transitio.osm.fetch_pbf` and
+  loads it as the editable network. The Network panel gains an "Acquire OSM
+  extract" control (place, current map view or a drawn area) with a confirm
+  step; acquiring replaces the current network at runtime rather than requiring
+  the `--osm-pbf` argument, refusing to discard unsaved edits without
+  confirmation and keeping the previous network if the download fails.
+- Crop a downloaded GTFS feed to an area: `POST /api/catalogue/download` takes
+  an optional `aoi` bounding box and crops the dataset to it via
+  `transitio.gtfs.crop_feed` (keeping trips that serve a stop inside the box,
+  cascading to a referentially consistent feed) before it enters the
+  catalogue, with a provenance sidecar recording the source, bbox and row
+  counts.
+- Draw an area on the map: a rectangle-draw tool stores one bounding box shared
+  by both flows, so a single drawn area can drive downloading and cropping the
+  PBF and the GTFS feed together. The Search tab's map-bounds checkbox becomes
+  a none / current map view / drawn area selector plus a "crop downloaded feed
+  to area" toggle.
+
 ## 0.5.0 — 2026-07-23
 
 ### Added
