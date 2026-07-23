@@ -147,6 +147,109 @@ export async function resetNetwork() {
   }
 }
 
+let resolveSeq = 0;
+
+export async function resolveOsm(aoi) {
+  const acquire = store.network.acquire;
+  const seq = ++resolveSeq; // only the latest resolve may write the result
+  acquire.resolving = true;
+  acquire.error = "";
+  acquire.resolved = null;
+  try {
+    const resolved = await api("POST", "/api/osm/resolve", { aoi });
+    if (seq !== resolveSeq) return;
+    acquire.resolved = resolved;
+    store.status = "";
+  } catch (error) {
+    if (seq !== resolveSeq) return;
+    acquire.error = error.message;
+  } finally {
+    if (seq === resolveSeq) acquire.resolving = false;
+  }
+}
+
+export function resolveOsmByPlace() {
+  const place = store.network.acquire.place.trim();
+  if (place) resolveOsm(place);
+}
+
+export function resolveOsmByView() {
+  const bbox = mapBridge.getViewportBbox();
+  if (bbox) {
+    resolveOsm(bbox);
+  } else {
+    // A failed new request must invalidate any prior resolved extract so its
+    // Download button can't act on a stale AOI.
+    store.network.acquire.resolved = null;
+    store.network.acquire.error = "the current map view is not a valid area";
+  }
+}
+
+export function cancelAcquire() {
+  store.network.acquire.resolved = null;
+  store.network.acquire.error = "";
+}
+
+export async function acquireOsm(discardEdits = false) {
+  const net = store.network;
+  const acquire = net.acquire;
+  const resolved = acquire.resolved;
+  if (!resolved || acquire.downloading) return;
+  // An in-progress draw/move references the current network and would be
+  // discarded by the swap; confirm rather than dropping it silently.
+  const hasDraft = net.draw.length > 0 || net.movingNode != null;
+  if (hasDraft && !discardEdits) {
+    if (!window.confirm("Discard the in-progress drawing and acquire a new extract?"))
+      return;
+  }
+  acquire.downloading = true;
+  acquire.error = "";
+  try {
+    await api("POST", "/api/osm/download", {
+      bbox: resolved.bbox,
+      url: resolved.url,
+      discard_edits: discardEdits,
+    });
+  } catch (error) {
+    // 409 on submitted-but-unsaved edits: confirm discarding, then retry once.
+    if (
+      error.status === 409 &&
+      !discardEdits &&
+      /unsaved network edits/.test(error.message)
+    ) {
+      acquire.downloading = false;
+      if (window.confirm("Discard unsaved network edits and load the new extract?")) {
+        return acquireOsm(true);
+      }
+      return;
+    }
+    acquire.error = error.message;
+    acquire.downloading = false;
+    return;
+  }
+  // The network changed: reset view state and render the new one.
+  net.available = true;
+  net.loaded = false;
+  net.selected = null;
+  net.error = "";
+  setNetworkMode("select"); // clears any in-progress draw/move
+  try {
+    await mapBridge.mapReady;
+    await mapBridge.fetchNetwork();
+    net.loaded = true;
+    mapBridge.setNetworkVisible(net.visible);
+    mapBridge.fitBbox(resolved.bbox);
+    await mapBridge.refreshSummary(); // snapping is now available
+    store.status = `loaded OSM extract "${resolved.name}"`;
+  } catch (error) {
+    net.error = error.message;
+  } finally {
+    acquire.downloading = false;
+    acquire.resolved = null;
+    acquire.place = "";
+  }
+}
+
 export function toggleNetworkVisible() {
   store.network.visible = !store.network.visible;
   mapBridge.setNetworkVisible(store.network.visible);

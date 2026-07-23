@@ -42,6 +42,18 @@ export function getViewportBbox() {
   return [sw.lng, clampLat(sw.lat), ne.lng, clampLat(ne.lat)];
 }
 
+export function fitBbox(bbox) {
+  if (!map || !bbox) return;
+  const [minx, miny, maxx, maxy] = bbox;
+  map.fitBounds(
+    [
+      [minx, miny],
+      [maxx, maxy],
+    ],
+    { padding: 40, maxZoom: 15 },
+  );
+}
+
 function renderPreview() {
   const source = map.getSource("preview");
   if (source) {
@@ -416,8 +428,11 @@ export function clearNetworkDraw() {
 }
 
 async function handleNetworkClick(event) {
-  const { lng, lat } = event.lngLat;
   const net = store.network;
+  // Acquisition is swapping the network out; ignore edits until it settles,
+  // so a click can't act on the old (or mid-swap) features.
+  if (net.acquire.downloading) return;
+  const { lng, lat } = event.lngLat;
   if (net.mode === "draw-way") {
     // Resolve the click against what is under it: an existing node is reused,
     // an existing way is split into a junction, empty space is a new node.

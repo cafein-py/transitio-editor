@@ -14,7 +14,9 @@ export async function api(method, path, body) {
     } catch (error) {
       /* not JSON */
     }
-    throw new Error(`${method} ${path}: ${detail}`);
+    const error = new Error(`${method} ${path}: ${detail}`);
+    error.status = response.status;
+    throw error;
   }
   return response.json();
 }
