@@ -1042,3 +1042,277 @@ def test_network_huge_int_coord_is_422(editor):
         ).status_code
         == 422
     )
+
+
+def _network_ways(client):
+    features = client.get("/api/network/features").json()["ways"]["features"]
+    return {w["properties"]["id"]: w for w in features}
+
+
+def test_network_add_way_from_coords(editor):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    new = client.post(
+        "/api/network/ways",
+        json={
+            "vertices": [{"lon": 26.95, "lat": 60.52}, {"lon": 26.951, "lat": 60.521}],
+            "tags": {"highway": "path"},
+        },
+    )
+    assert new.status_code == 200
+    way_id = new.json()["id"]
+    assert way_id < 0
+    ways = _network_ways(client)
+    assert way_id in ways and ways[way_id]["properties"].get("highway") == "path"
+    assert len(ways[way_id]["properties"]["nodes"]) == 2  # two fresh nodes
+
+
+def test_network_add_way_reuses_clicked_node(editor):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    node_id = _first_network_node(client)
+    new = client.post(
+        "/api/network/ways",
+        json={
+            "vertices": [{"node": node_id}, {"lon": 26.95, "lat": 60.52}],
+            "tags": {"highway": "footway"},
+        },
+    )
+    assert new.status_code == 200
+    ways = _network_ways(client)
+    assert node_id in ways[new.json()["id"]]["properties"]["nodes"]
+
+
+def test_network_add_way_splits_existing_way(editor):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    ways = client.get("/api/network/features").json()["ways"]["features"]
+    # a way fully inside the extract (coords map 1:1 to members) can be split
+    target = next(
+        w
+        for w in ways
+        if w["geometry"]["type"] == "LineString"
+        and len(w["geometry"]["coordinates"]) == len(w["properties"]["nodes"])
+        and len(w["properties"]["nodes"]) >= 2
+    )
+    way_id = target["properties"]["id"]
+    before = list(target["properties"]["nodes"])
+    (x0, y0), (x1, y1) = target["geometry"]["coordinates"][:2]
+    mid_lon, mid_lat = (x0 + x1) / 2, (y0 + y1) / 2
+    new = client.post(
+        "/api/network/ways",
+        json={
+            "vertices": [
+                {"split_way": way_id, "lon": mid_lon, "lat": mid_lat},
+                {"lon": mid_lon + 0.001, "lat": mid_lat + 0.001},
+            ],
+            "tags": {"highway": "footway"},
+        },
+    )
+    assert new.status_code == 200
+    ways2 = _network_ways(client)
+    after = list(ways2[way_id]["properties"]["nodes"])
+    assert len(after) == len(before) + 1  # junction inserted
+    (junction,) = set(after) - set(before)
+    assert junction in ways2[new.json()["id"]]["properties"]["nodes"]  # connected
+
+
+def test_network_delete_and_retag_way(editor):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    way_id = next(iter(_network_ways(client)))
+    assert (
+        client.patch(
+            f"/api/network/ways/{way_id}", json={"tags": {"surface": "gravel"}}
+        ).status_code
+        == 200
+    )
+    assert _network_ways(client)[way_id]["properties"].get("surface") == "gravel"
+    assert client.delete(f"/api/network/ways/{way_id}").status_code == 200
+    assert way_id not in _network_ways(client)
+
+
+def test_network_way_errors(editor):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    assert (
+        client.post(
+            "/api/network/ways", json={"vertices": [{"lon": 26.9, "lat": 60.5}]}
+        ).status_code
+        == 422  # fewer than two vertices
+    )
+    assert (
+        client.post(
+            "/api/network/ways",
+            json={"vertices": [{"node": 999999999}, {"lon": 26.9, "lat": 60.5}]},
+        ).status_code
+        == 404  # unknown node reference
+    )
+    assert client.delete("/api/network/ways/999999999").status_code == 404
+    assert (
+        client.patch(
+            "/api/network/ways/999999999", json={"tags": {"a": "b"}}
+        ).status_code
+        == 404
+    )
+    way_id = next(iter(_network_ways(client)))
+    assert client.patch(f"/api/network/ways/{way_id}", json={}).status_code == 422
+
+
+def test_network_add_way_snaps_coord_to_nearby_node(editor):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    features = client.get("/api/network/features").json()
+    node = features["nodes"]["features"][0]
+    node_id = node["properties"]["id"]
+    nlon, nlat = node["geometry"]["coordinates"]
+    before_nodes = len(features["nodes"]["features"])
+    # first vertex ~0.3 m from an existing node -> reuse it, not duplicate
+    new = client.post(
+        "/api/network/ways",
+        json={
+            "vertices": [
+                {"lon": nlon + 0.000005, "lat": nlat},
+                {"lon": nlon + 0.001, "lat": nlat},
+            ],
+            "tags": {"highway": "footway"},
+        },
+    )
+    assert new.status_code == 200
+    members = _network_ways(client)[new.json()["id"]]["properties"]["nodes"]
+    assert node_id in members  # snapped to the existing node
+    after_nodes = len(client.get("/api/network/features").json()["nodes"]["features"])
+    assert after_nodes == before_nodes + 1  # only the far endpoint is new
+
+
+def test_network_split_far_point_rejected(editor):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    target = next(
+        w
+        for w in client.get("/api/network/features").json()["ways"]["features"]
+        if w["geometry"]["type"] == "LineString"
+        and len(w["geometry"]["coordinates"]) == len(w["properties"]["nodes"])
+    )
+    new = client.post(
+        "/api/network/ways",
+        json={
+            "vertices": [
+                {"split_way": target["properties"]["id"], "lon": 10.0, "lat": 10.0},
+                {"lon": 10.001, "lat": 10.0},
+            ],
+        },
+    )
+    assert new.status_code == 422  # the point is not on the way
+
+
+def test_network_id_parsing_rejects_non_integers(editor):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    tail = {"lon": 26.9, "lat": 60.5}
+    assert (
+        client.post(
+            "/api/network/ways", json={"vertices": [{"node": 123.9}, tail]}
+        ).status_code
+        == 422  # float id not truncated
+    )
+    assert (
+        client.post(
+            "/api/network/ways", json={"vertices": [{"node": True}, tail]}
+        ).status_code
+        == 422  # bool id not coerced
+    )
+
+
+def test_network_way_reserved_tag_key_rejected_atomically(editor):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    before = len(client.get("/api/network/features").json()["nodes"]["features"])
+    # a reserved tag key (collides with a method parameter) is rejected up
+    # front — 422, not a 500, and with no orphan nodes created
+    response = client.post(
+        "/api/network/ways",
+        json={
+            "vertices": [{"lon": 26.95, "lat": 60.52}, {"lon": 26.951, "lat": 60.521}],
+            "tags": {"lon": "5"},
+        },
+    )
+    assert response.status_code == 422
+    after = len(client.get("/api/network/features").json()["nodes"]["features"])
+    assert after == before  # nothing was created
+
+
+def test_network_split_at_existing_member_reuses_node(editor):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    target = next(
+        w
+        for w in client.get("/api/network/features").json()["ways"]["features"]
+        if w["geometry"]["type"] == "LineString"
+        and len(w["geometry"]["coordinates"]) == len(w["properties"]["nodes"])
+        and len(w["properties"]["nodes"]) >= 3
+    )
+    way_id = target["properties"]["id"]
+    members_before = list(target["properties"]["nodes"])
+    before_nodes = len(client.get("/api/network/features").json()["nodes"]["features"])
+    # split exactly at an existing interior member node
+    vx, vy = target["geometry"]["coordinates"][1]
+    new = client.post(
+        "/api/network/ways",
+        json={
+            "vertices": [
+                {"split_way": way_id, "lon": vx, "lat": vy},
+                {"lon": vx + 0.001, "lat": vy},
+            ],
+            "tags": {"highway": "footway"},
+        },
+    )
+    assert new.status_code == 200
+    ways = _network_ways(client)
+    # the way is unchanged (the existing member was reused, no junction added)
+    assert len(ways[way_id]["properties"]["nodes"]) == len(members_before)
+    assert members_before[1] in ways[new.json()["id"]]["properties"]["nodes"]
+    after_nodes = len(client.get("/api/network/features").json()["nodes"]["features"])
+    assert after_nodes == before_nodes + 1  # only the far endpoint is new
+
+
+def test_network_add_way_nearby_fresh_points_reuse(editor):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    # two drawn points within snap tolerance resolve to one node, so the way
+    # collapses (422) instead of creating colocated nodes and a zero-length edge
+    response = client.post(
+        "/api/network/ways",
+        json={
+            "vertices": [
+                {"lon": 26.9500, "lat": 60.5200},
+                {"lon": 26.950001, "lat": 60.5200},
+            ],
+            "tags": {"highway": "footway"},
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_network_tag_and_coord_edge_validation(editor):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    tail = {"lon": 26.91, "lat": 60.5}
+    # a tag key colliding with the method receiver is rejected, not a 500
+    assert (
+        client.post(
+            "/api/network/ways",
+            json={
+                "vertices": [{"lon": 26.9, "lat": 60.5}, tail],
+                "tags": {"self": "x"},
+            },
+        ).status_code
+        == 422
+    )
+    # a boolean coordinate must not pass as 1.0
+    assert (
+        client.post("/api/network/nodes", json={"lon": True, "lat": 60.5}).status_code
+        == 422
+    )
+    # an explicit null 'tags' is malformed, not treated as absent
+    assert (
+        client.post(
+            "/api/network/nodes", json={"lon": 26.9, "lat": 60.5, "tags": None}
+        ).status_code
+        == 422
+    )
+    # exponent-notation id strings are not accepted
+    assert (
+        client.post(
+            "/api/network/ways", json={"vertices": [{"node": "1e3"}, tail]}
+        ).status_code
+        == 422
+    )

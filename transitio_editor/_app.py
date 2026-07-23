@@ -79,7 +79,7 @@ def create_app(
     network_filter : dict, optional
         pyrosm Overpass-style tag filter selecting the editable OSM
         network served at ``GET /api/network/*`` (from ``osm_pbf``);
-        defaults to all highways plus tram/rail. See
+        defaults to all highways plus tram/rail/light_rail/subway. See
         :class:`~transitio.edit.OsmEditor`.
     max_network_ways : int, default 50000
         Refuse to serve an OSM network with more ways than this (guards
@@ -800,30 +800,71 @@ def create_app(
     def network_summary():
         return {"available": osm_pbf is not None}
 
-    def _network_node_id(raw):
-        try:
-            return int(raw)  # provisional nodes carry negative ids
-        except (TypeError, ValueError):
-            raise HTTPException(422, "node id must be an integer") from None
+    def _network_int_id(raw):
+        # Provisional elements carry negative ids. Parse exactly (no float,
+        # which would round ids past 2**53 or accept exponent notation) and
+        # reject non-integers rather than coercing a bool to an element.
+        if isinstance(raw, bool):
+            raise HTTPException(422, "id must be an integer")
+        if isinstance(raw, int):
+            return raw
+        if isinstance(raw, str):
+            try:
+                return int(raw, 10)
+            except ValueError:
+                raise HTTPException(422, "id must be an integer") from None
+        raise HTTPException(422, "id must be an integer")
+
+    # Tag keys OsmEditor refuses as tags (identity/geometry/metadata) plus its
+    # mutation-method parameter names; rejecting them here keeps a bad key from
+    # colliding with a keyword argument (TypeError) or failing only after the
+    # draw's nodes and splits are already applied.
+    _reserved_tag_keys = frozenset(
+        {
+            "id",
+            "osm_type",
+            "nodes",
+            "geometry",
+            "lon",
+            "lat",
+            "u",
+            "v",
+            "length",
+            "tags",
+            "timestamp",
+            "version",
+            "changeset",
+            "visible",
+            "node_ids",
+            "way_id",
+            "node_id",
+            "self",
+        }
+    )
 
     def _network_tags(payload):
-        tags = payload.get("tags")
-        if tags is None:
+        if "tags" not in payload:
             return {}
-        if not isinstance(tags, dict):
+        tags = payload["tags"]
+        if not isinstance(tags, dict):  # an explicit null/list is malformed
             raise HTTPException(422, "'tags' must be an object")
         clean = {}
         for key, value in tags.items():
             if not isinstance(value, str):
                 raise HTTPException(422, f"tag '{key}' value must be a string")
+            if str(key) in _reserved_tag_keys:
+                raise HTTPException(422, f"reserved tag key '{key}'")
             clean[str(key)] = value
         return clean
 
     def _network_coord(payload, key):
         if key not in payload:
             raise HTTPException(422, f"missing '{key}'")
+        value = payload[key]
+        if isinstance(value, bool):  # float(True) == 1.0 would slip through
+            raise HTTPException(422, f"'{key}' must be a number")
         try:
-            return _finite(payload[key], key)
+            return _finite(value, key)
         except (TypeError, ValueError, OverflowError) as error:
             raise HTTPException(422, str(error) or "invalid coordinate") from None
 
@@ -853,7 +894,7 @@ def create_app(
 
     @app.patch("/api/network/nodes/{node_id}")
     def network_update_node(node_id: str, payload: dict = Body(...)):
-        target = _network_node_id(node_id)
+        target = _network_int_id(node_id)
         # Validate everything before touching the editor so a bad tag can't
         # leave a half-applied move.
         if ("lon" in payload) != ("lat" in payload):
@@ -872,7 +913,7 @@ def create_app(
 
     @app.delete("/api/network/nodes/{node_id}")
     def network_delete_node(node_id: str):
-        target = _network_node_id(node_id)
+        target = _network_int_id(node_id)
         with lock:
             editor = get_osm_editor()
             _edit_network(lambda: editor.delete_node(target))
@@ -900,5 +941,175 @@ def create_app(
                 "nodes": _network_features(editor.nodes),
                 "ways": _network_features(editor.ways),
             }
+
+    _SNAP_TOLERANCE_M = 8.0  # metres: reuse an existing node / accept a split
+
+    def _aeqd(lon0, lat0):
+        from pyproj import Transformer
+
+        return Transformer.from_crs(
+            "EPSG:4326",
+            f"+proj=aeqd +lat_0={lat0} +lon_0={lon0} +datum=WGS84",
+            always_xy=True,
+        ).transform
+
+    def _node_snapper(editor):
+        # Reuse the existing node nearest a drawn point (within tolerance), so a
+        # click near a node — one below the node layer's zoom, on another way at
+        # a crossing, or created earlier in this same draw — connects instead of
+        # duplicating. Returns ``nearest(lon, lat)`` and an ``add(lon, lat)``
+        # that also registers the new node for later vertices.
+        from shapely.geometry import Point
+        from shapely.strtree import STRtree
+
+        nodes = editor.nodes
+        if not len(nodes):  # e.g. every way (and its nodes) was deleted
+            return (lambda lon, lat: None), (lambda lon, lat: editor.add_node(lon, lat))
+        lons = nodes.geometry.x.to_numpy()
+        lats = nodes.geometry.y.to_numpy()
+        ids = [int(i) for i in nodes["id"]]
+        project = _aeqd(float(lons[0]), float(lats[0]))
+        xs, ys = project(lons, lats)
+        base = [Point(x, y) for x, y in zip(xs, ys)]
+        tree = STRtree(base) if base else None
+        fresh = []  # (id, projected Point) for nodes added during this draw
+
+        def nearest(lon, lat):
+            here = Point(*project(lon, lat))
+            best_id, best_distance = None, _SNAP_TOLERANCE_M
+            if tree is not None:
+                index = tree.nearest(here)
+                distance = base[index].distance(here)
+                if distance <= best_distance:
+                    best_id, best_distance = ids[index], distance
+            for node_id, point in fresh:
+                distance = point.distance(here)
+                if distance <= best_distance:
+                    best_id, best_distance = node_id, distance
+            return best_id
+
+        def add(lon, lat):
+            node_id = editor.add_node(lon, lat)
+            fresh.append((node_id, Point(*project(lon, lat))))
+            return node_id
+
+        return nearest, add
+
+    def _splittable_way(editor, way_id):
+        # A way can be split only if it lies fully inside the extract, where
+        # its member list maps 1:1 to its geometry.
+        row = editor.ways[editor.ways["id"] == way_id]
+        if row.empty:
+            raise HTTPException(404, f"no way {way_id}")
+        members = list(row.iloc[0]["nodes"])
+        geometry = row.iloc[0].geometry
+        if (
+            geometry is None
+            or geometry.geom_type != "LineString"
+            or len(geometry.coords) != len(members)
+        ):
+            raise HTTPException(422, f"way {way_id} leaves the extract; cannot split")
+        return members, geometry
+
+    def _project_onto_way(geometry, lon, lat):
+        # The point on the way nearest the click; refuse if the click is not
+        # actually on the way (avoids bending an unrelated way to a stray point).
+        from shapely.geometry import Point
+
+        snapped = geometry.interpolate(geometry.project(Point(lon, lat)))
+        sx, sy = _aeqd(lon, lat)(snapped.x, snapped.y)
+        if (sx * sx + sy * sy) ** 0.5 > _SNAP_TOLERANCE_M:
+            raise HTTPException(422, "split point is not on the way")
+        return snapped
+
+    def _check_vertex(editor, vertex, node_ids):
+        if not isinstance(vertex, dict):
+            raise HTTPException(422, "each vertex must be an object")
+        if "node" in vertex:
+            if _network_int_id(vertex["node"]) not in node_ids:
+                raise HTTPException(404, f"no node {vertex['node']}")
+        elif "split_way" in vertex:
+            lon, lat = _network_lonlat(vertex)
+            _, geometry = _splittable_way(editor, _network_int_id(vertex["split_way"]))
+            _project_onto_way(geometry, lon, lat)
+        else:
+            _network_lonlat(vertex)
+
+    def _resolve_vertex(editor, vertex, nearest, add):
+        # Assumes the vertex passed _check_vertex; applies it (may mutate).
+        from shapely.geometry import LineString
+
+        if "node" in vertex:
+            return _network_int_id(vertex["node"])
+        if "split_way" in vertex:
+            way_id = _network_int_id(vertex["split_way"])
+            lon, lat = _network_lonlat(vertex)
+            members, geometry = _splittable_way(editor, way_id)
+            snapped = _project_onto_way(geometry, lon, lat)
+            reuse = nearest(snapped.x, snapped.y)
+            if reuse is not None and reuse in members:
+                return reuse  # the split already sits on a node of this way
+            coords = list(geometry.coords)
+            segment = min(
+                range(len(coords) - 1),
+                key=lambda i: LineString([coords[i], coords[i + 1]]).distance(snapped),
+            )
+            # Share a nearby node (e.g. a crossing on another way) rather than
+            # duplicating it; otherwise create a fresh junction node.
+            junction = reuse if reuse is not None else add(snapped.x, snapped.y)
+            editor.reshape_way(
+                way_id, members[: segment + 1] + [junction] + members[segment + 1 :]
+            )
+            return junction
+        lon, lat = _network_lonlat(vertex)
+        reuse = nearest(lon, lat)
+        return reuse if reuse is not None else add(lon, lat)
+
+    @app.post("/api/network/ways")
+    def network_add_way(payload: dict = Body(...)):
+        vertices = payload.get("vertices")
+        if not isinstance(vertices, list) or len(vertices) < 2:
+            raise HTTPException(422, "'vertices' needs at least two points")
+        tags = _network_tags(payload)
+        with lock:
+            editor = get_osm_editor()
+            node_ids = {int(value) for value in editor.nodes["id"]}
+            # Validate every vertex before mutating, so a bad one leaves no
+            # orphan nodes or half-split ways behind.
+            for vertex in vertices:
+                _check_vertex(editor, vertex, node_ids)
+            nearest, add = _node_snapper(editor)
+            members = [
+                _resolve_vertex(editor, vertex, nearest, add) for vertex in vertices
+            ]
+            # Drop consecutive duplicates (a click that snapped onto the
+            # previous node) so no zero-length segment is created.
+            collapsed = [members[0]]
+            for member in members[1:]:
+                if member != collapsed[-1]:
+                    collapsed.append(member)
+            if len(collapsed) < 2:
+                raise HTTPException(422, "way collapsed to a single node")
+            way_id = _edit_network(lambda: editor.add_way(collapsed, **tags))
+        return {"id": way_id}
+
+    @app.patch("/api/network/ways/{way_id}")
+    def network_update_way(way_id: str, payload: dict = Body(...)):
+        target = _network_int_id(way_id)
+        tags = _network_tags(payload)
+        if not tags:
+            raise HTTPException(422, "no tags to set")
+        with lock:
+            editor = get_osm_editor()
+            _edit_network(lambda: editor.retag_way(target, **tags))
+        return {"ok": True}
+
+    @app.delete("/api/network/ways/{way_id}")
+    def network_delete_way(way_id: str):
+        target = _network_int_id(way_id)
+        with lock:
+            editor = get_osm_editor()
+            _edit_network(lambda: editor.delete_way(target))
+        return {"ok": True}
 
     return app

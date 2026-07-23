@@ -37,7 +37,55 @@ export async function loadNetwork() {
 export function setNetworkMode(mode) {
   store.network.mode = mode;
   store.network.movingNode = null;
-  mapBridge.setCursor(mode === "add-node" ? "crosshair" : "");
+  mapBridge.clearNetworkDraw();
+  mapBridge.setCursor(
+    mode === "add-node" || mode === "draw-way" ? "crosshair" : "",
+  );
+}
+
+export async function finishDrawWay(tags) {
+  if (store.network.draw.length < 2) return;
+  const vertices = store.network.draw.map((point) => point.vertex);
+  try {
+    await api("POST", "/api/network/ways", { vertices, tags });
+    setNetworkMode("select"); // clears the draw and its preview
+    await mapBridge.fetchNetwork();
+    store.status = "";
+  } catch (error) {
+    store.status = error.message;
+  }
+}
+
+export function cancelDrawWay() {
+  setNetworkMode("select");
+}
+
+export async function deleteNetworkWay() {
+  const selected = store.network.selected;
+  if (!selected) return;
+  try {
+    await api("DELETE", `/api/network/ways/${selected.id}`);
+    store.network.selected = null;
+    await mapBridge.fetchNetwork();
+    store.status = "";
+  } catch (error) {
+    store.status = error.message;
+  }
+}
+
+export async function retagNetworkWay(key, value) {
+  const selected = store.network.selected;
+  if (!selected || !key.trim()) return;
+  try {
+    await api("PATCH", `/api/network/ways/${selected.id}`, {
+      tags: { [key.trim()]: value },
+    });
+    store.network.selected = { ...selected, [key.trim()]: value };
+    await mapBridge.fetchNetwork();
+    store.status = "";
+  } catch (error) {
+    store.status = error.message;
+  }
 }
 
 export function startMoveNode() {
@@ -81,9 +129,7 @@ export async function resetNetwork() {
   try {
     await api("POST", "/api/network/reset");
     store.network.selected = null;
-    store.network.movingNode = null;
-    store.network.mode = "select";
-    mapBridge.setCursor("");
+    setNetworkMode("select"); // clears an in-progress draw and its preview
     await mapBridge.fetchNetwork();
     store.status = "network edits discarded";
   } catch (error) {

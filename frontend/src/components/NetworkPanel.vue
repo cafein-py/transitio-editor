@@ -3,10 +3,14 @@ import { computed, ref, watch } from "vue";
 import { store } from "../store.js";
 import { networkTags } from "../network.js";
 import {
+  cancelDrawWay,
   deleteNetworkNode,
+  deleteNetworkWay,
+  finishDrawWay,
   loadNetwork,
   resetNetwork,
   retagNetworkNode,
+  retagNetworkWay,
   setNetworkMode,
   startMoveNode,
   toggleFeedVisible,
@@ -22,20 +26,27 @@ watch(
   },
 );
 
+const selected = computed(() => store.network.selected);
 const selectedTags = computed(() =>
-  store.network.selected ? networkTags(store.network.selected) : [],
+  selected.value ? networkTags(selected.value) : [],
 );
-const selectedNode = computed(
-  () => store.network.selected && store.network.selected.osm_type === "node",
-);
+const isWay = computed(() => selected.value && selected.value.osm_type === "way");
+const isNode = computed(() => selected.value && selected.value.osm_type === "node");
 
 const tagKey = ref("");
 const tagValue = ref("");
 function applyTag() {
-  retagNetworkNode(tagKey.value, tagValue.value);
+  if (isWay.value) retagNetworkWay(tagKey.value, tagValue.value);
+  else retagNetworkNode(tagKey.value, tagValue.value);
   tagKey.value = "";
   tagValue.value = "";
 }
+function deleteSelected() {
+  if (isWay.value) deleteNetworkWay();
+  else deleteNetworkNode();
+}
+
+const drawHighway = ref("footway");
 </script>
 
 <template>
@@ -77,6 +88,27 @@ function applyTag() {
         >
           Add node
         </button>
+        <button
+          class="mode"
+          :class="{ active: store.network.mode === 'draw-way' }"
+          @click="setNetworkMode('draw-way')"
+        >
+          Draw way
+        </button>
+      </div>
+
+      <div v-if="store.network.mode === 'draw-way'" class="net-draw">
+        <p class="hint">
+          Click the map to add points; click a node or way to connect to it
+          ({{ store.network.draw.length }} points).
+        </p>
+        <div class="net-retag">
+          <input v-model="drawHighway" placeholder="highway type" />
+          <button :disabled="store.network.draw.length < 2" @click="finishDrawWay({ highway: drawHighway })">
+            Finish
+          </button>
+          <button @click="cancelDrawWay">Cancel</button>
+        </div>
       </div>
 
       <p v-if="store.network.loading" class="hint">loading network…</p>
@@ -88,10 +120,9 @@ function applyTag() {
         zoom in to see nodes.
       </p>
 
-      <div v-if="store.network.selected" class="net-inspector">
+      <div v-if="selected" class="net-inspector">
         <div class="net-head">
-          {{ store.network.selected.osm_type || "element" }}
-          {{ store.network.selected.id }}
+          {{ selected.osm_type || "element" }} {{ selected.id }}
         </div>
         <table v-if="selectedTags.length" class="net-tags">
           <tr v-for="[key, value] in selectedTags" :key="key">
@@ -101,10 +132,10 @@ function applyTag() {
         </table>
         <p v-else class="hint">no tags</p>
 
-        <template v-if="selectedNode">
+        <template v-if="isNode || isWay">
           <div class="mode-row">
-            <button @click="startMoveNode">Move</button>
-            <button class="remove" @click="deleteNetworkNode">Delete</button>
+            <button v-if="isNode" @click="startMoveNode">Move</button>
+            <button class="remove" @click="deleteSelected">Delete</button>
           </div>
           <form class="net-retag" @submit.prevent="applyTag">
             <input v-model="tagKey" placeholder="tag key" />
@@ -113,8 +144,8 @@ function applyTag() {
           </form>
         </template>
       </div>
-      <p v-else-if="store.network.loaded" class="hint">
-        click a node to inspect or edit it; Add node then click the map.
+      <p v-else-if="store.network.loaded && store.network.mode === 'select'" class="hint">
+        click a node or way to inspect or edit it.
       </p>
 
       <button
