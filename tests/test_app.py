@@ -831,6 +831,109 @@ def test_download_failure_returns_502(editor):
     )
 
 
+def _two_area_feed(path):
+    # a valid feed with a Helsinki trip and a far-away (0, 0) trip.
+    b = FeedBuilder()
+    b.add_agency("a", "A", "https://a.example", "Europe/Helsinki")
+    b.add_route("r", 3, "1", agency_id="a")
+    b.add_service("wk", "weekdays", "20260101", "20261231")
+    b.add_stop("h1", "Kamppi", 60.169, 24.931)
+    b.add_stop("h2", "Steissi", 60.171, 24.941)
+    b.add_stop("f1", "Far1", 0.0, 0.0)
+    b.add_stop("f2", "Far2", 0.001, 0.001)
+    b.add_frequency_trip(
+        "r",
+        "wk",
+        "th",
+        [("h1", 0), ("h2", 300)],
+        start="06:00:00",
+        end="09:00:00",
+        headway=600,
+    )
+    b.add_frequency_trip(
+        "r",
+        "wk",
+        "tf",
+        [("f1", 0), ("f2", 300)],
+        start="06:00:00",
+        end="09:00:00",
+        headway=600,
+    )
+    b.save(path, reference_date="20260601")
+    return str(path)
+
+
+_HELSINKI_AOI = [24.90, 60.16, 24.96, 60.18]
+
+
+def test_download_crops_to_aoi(editor, tmp_path):
+    zip_path = _two_area_feed(tmp_path / "two.zip")
+    stub = _StubCatalog([_catalog_feed()], token="tok", download_path=zip_path)
+    client = TestClient(create_app(editor, catalog_factory=lambda: stub))
+    client.get("/api/search")  # populate the download cache
+    entry = client.post(
+        "/api/catalogue/download", json={"feed_id": "mdb-1", "aoi": _HELSINKI_AOI}
+    ).json()
+    # only the Helsinki trip survives; the far stops cascade away
+    assert entry["tables"]["stops.txt"] == 2
+    assert entry["tables"]["trips.txt"] == 1
+    assert ".aoi-" in entry["source"] and entry["source"].endswith(".zip")
+    # the cropped feed is referentially consistent across the main foreign keys
+    t = FeedEditor(entry["source"]).tables
+    assert set(t["stop_times.txt"]["stop_id"]) <= {"h1", "h2"}
+    assert set(t["stop_times.txt"]["trip_id"]) <= set(t["trips.txt"]["trip_id"])
+    assert set(t["trips.txt"]["route_id"]) <= set(t["routes.txt"]["route_id"])
+    assert set(t["trips.txt"]["service_id"]) <= set(t["calendar.txt"]["service_id"])
+    assert set(t["frequencies.txt"]["trip_id"]) <= set(t["trips.txt"]["trip_id"])
+
+
+def test_download_without_aoi_is_full(editor, tmp_path):
+    zip_path = _two_area_feed(tmp_path / "two.zip")
+    stub = _StubCatalog([_catalog_feed()], token="tok", download_path=zip_path)
+    client = TestClient(create_app(editor, catalog_factory=lambda: stub))
+    client.get("/api/search")
+    entry = client.post("/api/catalogue/download", json={"feed_id": "mdb-1"}).json()
+    assert entry["tables"]["stops.txt"] == 4 and entry["tables"]["trips.txt"] == 2
+    assert ".aoi-" not in entry["source"]
+
+
+def test_download_crop_writes_provenance(editor, tmp_path):
+    import json
+
+    zip_path = _two_area_feed(tmp_path / "two.zip")
+    stub = _StubCatalog([_catalog_feed()], token="tok", download_path=zip_path)
+    client = TestClient(create_app(editor, catalog_factory=lambda: stub))
+    client.get("/api/search")
+    entry = client.post(
+        "/api/catalogue/download", json={"feed_id": "mdb-1", "aoi": _HELSINKI_AOI}
+    ).json()
+    sidecar = entry["source"] + ".provenance.json"
+    data = json.loads(open(sidecar).read())
+    assert data["aoi_bbox"] == _HELSINKI_AOI
+    assert data["row_counts"]["stops.txt"] == 2 and data["source_dataset"]
+
+
+def test_download_rejects_bad_aoi(editor):
+    stub = _StubCatalog([_catalog_feed()], token="tok")
+    client = TestClient(create_app(editor, catalog_factory=lambda: stub))
+    # bad bbox is rejected before any download (no search needed)
+    got = client.post(
+        "/api/catalogue/download",
+        json={"feed_id": "mdb-1", "aoi": [400, 60, 25, 61]},
+    )
+    assert got.status_code == 422
+
+
+def test_add_stop_out_of_range_coord_is_422(editor):
+    # a JSON integer beyond float range must be a 422, not an uncaught 500.
+    client = TestClient(create_app(editor))
+    got = client.post(
+        "/api/stops",
+        json={"stop_id": "x", "stop_name": "X", "stop_lat": 10**400, "stop_lon": 24.9},
+    )
+    assert got.status_code == 422
+
+
 def _osm_pbf():
     pytest.importorskip("pyrosm")
     from pyrosm import get_data

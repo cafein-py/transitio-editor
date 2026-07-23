@@ -249,7 +249,10 @@ def create_app(
         return osm_state["editor"]
 
     def _finite(value, field):
-        number = float(value)
+        try:
+            number = float(value)
+        except OverflowError:
+            raise ValueError(f"{field} is out of range") from None
         if not math.isfinite(number):
             raise ValueError(f"{field} must be finite")
         return number
@@ -814,6 +817,9 @@ def create_app(
         activate = payload.get("activate", True)
         if not isinstance(activate, bool):
             raise HTTPException(422, "'activate' must be a boolean")
+        aoi = payload.get("aoi")
+        if aoi is not None:
+            aoi = _acquire_bbox(aoi)  # validate before touching the network
         feed = search_cache.get(feed_id)
         if feed is None:
             raise HTTPException(404, f"unknown feed {feed_id}; search for it first")
@@ -822,20 +828,75 @@ def create_app(
 
         from transitio.edit import FeedEditor
 
-        # Download and load outside the lock; only the registry insert needs it.
+        # Download, optionally crop, and load outside the lock; only the
+        # registry insert needs it.
         try:
             path = get_catalog().download_latest(feed)
-            loaded = FeedEditor(path)
         except Exception as error:  # noqa: B902
             raise HTTPException(502, f"download failed: {error}") from None
+        source = path
+        if aoi is not None:
+            source = _crop_downloaded_feed(path, aoi, feed)
+        try:
+            loaded = FeedEditor(source)
+        except Exception as error:  # noqa: B902
+            if aoi is not None:  # discard the unreadable crop (keep the cache)
+                try:
+                    os.unlink(source)
+                except OSError:
+                    pass
+            raise HTTPException(422, f"cannot load feed: {error}") from None
         with lock:
             entry = registry.add(
                 loaded,
                 feed.provider or feed.id,
-                source=os.fspath(path),
+                source=os.fspath(source),
             )
             entry.active = activate
             return entry_dict(entry, registry)
+
+    def _crop_downloaded_feed(path, aoi, feed):
+        # Crop the downloaded GTFS to the AOI bbox and drop a provenance
+        # sidecar recording the source dataset, bbox and resulting row counts.
+        import datetime
+        import hashlib
+        import json
+        import shutil
+        import tempfile
+
+        from transitio.gtfs import crop_feed
+
+        source = Path(os.fspath(path))
+        # Co-locate the crop with its downloaded source, keyed by the AOI: a
+        # different area gets a different file (never overwriting another
+        # entry's), re-cropping the same area is idempotent, and the crop shares
+        # the download cache's lifecycle rather than orphaning a temp dir.
+        tag = hashlib.sha1(repr(tuple(aoi)).encode()).hexdigest()[:12]
+        cropped = source.with_name(f"{source.stem}.aoi-{tag}.zip")
+        # Crop into a private temp dir, then publish atomically, so a failed or
+        # concurrent same-AOI crop can't leave a partial file or delete one a
+        # reader holds.
+        stage = tempfile.mkdtemp(dir=os.fspath(source.parent), prefix=".aoicrop-")
+        try:
+            staged = os.path.join(stage, "crop.zip")
+            result = crop_feed(os.fspath(source), staged, aoi=aoi)
+            os.replace(staged, os.fspath(cropped))
+        except Exception as error:  # noqa: B902
+            raise HTTPException(422, f"crop failed: {error}") from None
+        finally:
+            shutil.rmtree(stage, ignore_errors=True)
+        provenance = {
+            "source_dataset": feed.latest_dataset_url,
+            "aoi_bbox": list(aoi),
+            "row_counts": (
+                result.get("row_counts") if isinstance(result, dict) else None
+            ),
+            "cropped_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+        _write_sidecar(
+            os.fspath(cropped) + ".provenance.json", json.dumps(provenance, indent=2)
+        )
+        return cropped
 
     @app.get("/api/network/nodes")
     def network_nodes():
@@ -1336,6 +1397,10 @@ def create_app(
                 raise HTTPException(422, "way collapsed to a single node")
 
             # Apply: create each site's node once, splice it into its ways.
+            # Mark dirty up front: the node/reshape mutations below happen
+            # before the final add_way, so a mid-apply failure still leaves the
+            # network changed.
+            osm_state["dirty"] = True
             node_of = {}
             for index in collapsed:
                 if index in node_of:
