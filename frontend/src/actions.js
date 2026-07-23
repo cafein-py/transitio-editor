@@ -125,6 +125,16 @@ export async function retagNetworkNode(key, value) {
   }
 }
 
+export async function saveNetwork(path) {
+  if (!path.trim()) return;
+  try {
+    const body = await api("POST", "/api/network/save", { path: path.trim() });
+    store.status = `network saved to ${body.path}`;
+  } catch (error) {
+    store.status = error.message;
+  }
+}
+
 export async function resetNetwork() {
   try {
     await api("POST", "/api/network/reset");

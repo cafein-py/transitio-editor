@@ -10,6 +10,7 @@ import {
   loadNetwork,
   resetNetwork,
   retagNetworkNode,
+  saveNetwork,
   retagNetworkWay,
   setNetworkMode,
   startMoveNode,
@@ -46,7 +47,14 @@ function deleteSelected() {
   else deleteNetworkNode();
 }
 
-const drawHighway = ref("footway");
+const drawTagKey = ref("highway");
+const drawTagValue = ref("footway");
+function finishDraw() {
+  const key = drawTagKey.value.trim();
+  if (!key) return; // a way needs at least one tag
+  finishDrawWay({ [key]: drawTagValue.value });
+}
+const savePath = ref("edited.osm.pbf");
 </script>
 
 <template>
@@ -103,8 +111,14 @@ const drawHighway = ref("footway");
           ({{ store.network.draw.length }} points).
         </p>
         <div class="net-retag">
-          <input v-model="drawHighway" placeholder="highway type" />
-          <button :disabled="store.network.draw.length < 2" @click="finishDrawWay({ highway: drawHighway })">
+          <input v-model="drawTagKey" placeholder="tag key" />
+          <input v-model="drawTagValue" placeholder="value" />
+        </div>
+        <div class="mode-row">
+          <button
+            :disabled="store.network.draw.length < 2 || !drawTagKey.trim()"
+            @click="finishDraw"
+          >
             Finish
           </button>
           <button @click="cancelDrawWay">Cancel</button>
@@ -148,6 +162,14 @@ const drawHighway = ref("footway");
         click a node or way to inspect or edit it.
       </p>
 
+      <form
+        v-if="store.network.loaded"
+        class="net-save"
+        @submit.prevent="saveNetwork(savePath)"
+      >
+        <input v-model="savePath" placeholder="output .osm.pbf path" />
+        <button type="submit" :disabled="!savePath.trim()">Save network</button>
+      </form>
       <button
         v-if="store.network.loaded"
         class="net-reset"
