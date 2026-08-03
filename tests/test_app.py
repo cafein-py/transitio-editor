@@ -797,8 +797,10 @@ def test_download_adds_searched_feed_to_catalogue(editor, tmp_path):
     # the origin records the Mobility DB id, so the search list can mark
     # already-downloaded feeds; locally loaded feeds carry no origin
     assert entry["origin"] == "mdb-1"
+    assert entry["modes"] == [3]  # the downloaded fixture is a bus feed
     local = client.get("/api/catalogue").json()["feeds"][0]
     assert local["origin"] is None
+    assert local["modes"] == [0]  # the editor fixture's route is a tram
     assert stub.downloaded == ["mdb-1"]
 
     feeds = client.get("/api/catalogue").json()["feeds"]

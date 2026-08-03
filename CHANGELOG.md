@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A "show stops" toggle: the Edit tab's legend panel (now "Map display")
   can hide the stop markers independently of the route shapes.
+- Catalogue entries show which transport modes a feed contains, as colored
+  chips matching the map legend (from a new `modes` field in the catalogue
+  API: the distinct normalised route types among the feed's routes).
 - Search results that are already in the catalogue show a green check
   instead of the Download button (removing the feed from the catalogue
   brings the button back), so it is easy to see which of an area's many

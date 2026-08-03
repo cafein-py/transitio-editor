@@ -5,6 +5,9 @@ from __future__ import annotations
 import math
 import os
 
+# shared with the catalogue's per-feed mode summary
+from transitio_editor._registry import base_route_type as _base_route_type
+
 
 def _geojson_feature(geometry_mapping, properties):
     return {"type": "Feature", "geometry": geometry_mapping, "properties": properties}
@@ -43,47 +46,6 @@ def _write_sidecar(path, text):
         except OSError:
             pass
         raise
-
-
-def _base_route_type(value):
-    """Normalise a GTFS route_type (incl. extended codes) to a base mode.
-
-    Extended types (Google extension, 100-1799) map onto their base GTFS
-    family so the frontend only sees codes 0-12; unknown values yield None.
-    """
-    try:
-        code = int(str(value).strip())
-    except (TypeError, ValueError):
-        return None
-    if 0 <= code <= 12:
-        return code
-    if 100 <= code < 200:  # railway service
-        return 2
-    if 200 <= code < 300:  # coach service
-        return 3
-    if 300 <= code < 400:  # suburban railway service
-        return 2
-    if code == 405:  # monorail
-        return 12
-    if 400 <= code < 500:  # urban railway / metro service
-        return 1
-    if 500 <= code < 700:  # metro / underground service
-        return 1
-    if 700 <= code < 800:  # bus service
-        return 3
-    if code == 800:  # trolleybus service
-        return 11
-    if 900 <= code < 1000:  # tram service
-        return 0
-    if 1000 <= code < 1100:  # water transport service
-        return 4
-    if 1200 <= code < 1300:  # ferry service
-        return 4
-    if 1300 <= code < 1400:  # aerial lift service
-        return 6
-    if 1400 <= code < 1500:  # funicular service
-        return 7
-    return None
 
 
 def _clean_id(value):

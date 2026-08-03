@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { currentFeed, feedTableSummary } from "../src/catalogue.js";
+import { currentFeed, feedModes, feedTableSummary } from "../src/catalogue.js";
 
 describe("feedTableSummary", () => {
   it("pluralizes counts and defaults missing tables to zero", () => {
@@ -30,5 +30,18 @@ describe("currentFeed", () => {
     expect(currentFeed(catalogue, "feed-9")).toBeNull();
     expect(currentFeed(catalogue, null)).toBeNull();
     expect(currentFeed([], "feed-1")).toBeNull();
+  });
+});
+
+describe("feedModes", () => {
+  it("maps present mode codes to legend entries, skipping unknown codes", () => {
+    const chips = feedModes([0, 3, 99]);
+    expect(chips.map((mode) => mode.label)).toEqual(["tram", "bus"]);
+    expect(chips.every((mode) => mode.color)).toBe(true);
+  });
+
+  it("is empty without modes", () => {
+    expect(feedModes([])).toEqual([]);
+    expect(feedModes(undefined)).toEqual([]);
   });
 });
