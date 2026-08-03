@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+
+- The `transitio-editor` command can now start without a GTFS feed: the
+  positional feed argument is optional, and when omitted the editor opens on
+  an empty feed to build from scratch on the Edit tab — or load, search and
+  download feeds (and acquire an OSM extract) entirely from the GUI.
+
 ## 0.6.0 — 2026-07-23
 
 ### Added
