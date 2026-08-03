@@ -81,6 +81,13 @@ table.times input { width: 76px; padding: 3px; }
 .search-table .download { padding: 2px 8px; font-size: 11px; }
 .search-table .in-catalogue { color: #2c7a3d; font-weight: 700; }
 .bulk-download { margin-top: 8px; }
+.dir-row { display: flex; gap: 4px; }
+.dir-row input { flex: 1; }
+.dir-browser { border: 1px solid #e2e0da; border-radius: 5px; padding: 6px; font-size: 12px; }
+.dir-browser .dir-path { font-weight: 600; word-break: break-all; margin-bottom: 4px; }
+.dir-browser .dir-list { list-style: none; margin: 0 0 6px; padding: 0; max-height: 160px; overflow-y: auto; }
+.dir-browser .dir-list button { display: block; width: 100%; text-align: left; border: 0; padding: 2px 4px; background: none; }
+.dir-browser .dir-list button:hover { background: #f0eee9; }
 .search code { background: #eee; padding: 0 3px; border-radius: 3px; }
 .search-area { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 4px 0; }
 .search-area select { font-size: 12px; }

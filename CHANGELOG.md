@@ -17,7 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An optional download folder on the Search tab: downloaded feeds (and
   their AOI-cropped copies) land there instead of the transitio cache; the
   folder is created on demand (`directory` on `POST
-  /api/catalogue/download`).
+  /api/catalogue/download`). A Browse… button opens a server-side folder
+  browser (`GET /api/fs/dirs`) to pick the folder by navigation instead of
+  typing a path — a page cannot read absolute paths from the native
+  picker, but the loopback backend can list the user's own directories.
 - Bulk download: search results have checkboxes (with a select-all header
   for everything downloadable) and a "Download selected" button fetches
   them one by one with the tab's folder and crop settings — progress in

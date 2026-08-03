@@ -1975,3 +1975,34 @@ def test_shapes_carry_route_type(editor, tmp_path):
     extended = TestClient(create_app(b))
     (feature,) = extended.get("/api/shapes").json()["features"]
     assert feature["properties"]["route_type"] == 3
+
+
+def test_fs_dirs_lists_subdirectories(editor, tmp_path):
+    client = TestClient(create_app(editor))
+    (tmp_path / "alpha").mkdir()
+    (tmp_path / "beta").mkdir()
+    (tmp_path / ".hidden").mkdir()
+    (tmp_path / "file.txt").write_text("x")
+    body = client.get("/api/fs/dirs", params={"path": str(tmp_path)}).json()
+    assert body["path"] == str(tmp_path)
+    assert body["dirs"] == ["alpha", "beta"]  # sorted; no dotdirs, no files
+    assert body["parent"] == str(tmp_path.parent)
+    # navigating into a child works; bad paths are 404, not 500
+    child = client.get(
+        "/api/fs/dirs", params={"path": str(tmp_path / "alpha")}
+    ).json()
+    assert child["parent"] == str(tmp_path)
+    assert (
+        client.get("/api/fs/dirs", params={"path": str(tmp_path / "nope")}).status_code
+        == 404
+    )
+    assert (
+        client.get(
+            "/api/fs/dirs", params={"path": str(tmp_path / "file.txt")}
+        ).status_code
+        == 404
+    )
+    # no path: the browser starts at the home directory
+    from pathlib import Path
+
+    assert client.get("/api/fs/dirs").json()["path"] == str(Path.home())

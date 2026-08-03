@@ -817,6 +817,32 @@ def create_app(
             raise HTTPException(422, "bbox coordinates out of range or reversed")
         return (minx, miny, maxx, maxy)
 
+    @app.get("/api/fs/dirs")
+    def fs_dirs(path: str | None = None):
+        # Directory listing for the download-folder browser. Same local-file
+        # trust model as loading a feed from a path or saving to one: the
+        # loopback single user browses their own machine.
+        base = Path(path).expanduser() if path else Path.home()
+        try:
+            base = base.resolve()
+        except (OSError, RuntimeError, ValueError) as error:
+            raise HTTPException(404, f"cannot resolve: {error}") from None
+        if not base.is_dir():
+            raise HTTPException(404, f"not a directory: {base}")
+        subdirs = []
+        try:
+            entries = list(base.iterdir())
+        except PermissionError:
+            raise HTTPException(403, f"not readable: {base}") from None
+        for entry in entries:
+            try:
+                if entry.is_dir() and not entry.name.startswith("."):
+                    subdirs.append(entry.name)
+            except OSError:
+                continue  # unreadable entry: skip it
+        parent = os.fspath(base.parent) if base.parent != base else None
+        return {"path": os.fspath(base), "parent": parent, "dirs": sorted(subdirs)}
+
     @app.get("/api/search")
     def search(
         country: str | None = None,

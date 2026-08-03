@@ -605,6 +605,35 @@ export async function downloadFeed(feed) {
   }
 }
 
+// Server-side folder browser for the download directory (a web page cannot
+// read absolute paths from a native picker; the loopback backend can).
+export async function openDirBrowser(path) {
+  const browse = store.search.browse;
+  const query = path ? `?path=${encodeURIComponent(path)}` : "";
+  try {
+    const listing = await api("GET", `/api/fs/dirs${query}`);
+    Object.assign(browse, {
+      open: true,
+      path: listing.path,
+      parent: listing.parent,
+      dirs: listing.dirs,
+      error: "",
+    });
+  } catch (error) {
+    browse.open = true;
+    browse.error = error.message;
+  }
+}
+
+export function closeDirBrowser() {
+  store.search.browse.open = false;
+}
+
+export function chooseBrowsedDir() {
+  store.search.downloadDir = store.search.browse.path;
+  store.search.browse.open = false;
+}
+
 export function toggleFeedSelected(feedId) {
   const selected = store.search.selected;
   const index = selected.indexOf(feedId);

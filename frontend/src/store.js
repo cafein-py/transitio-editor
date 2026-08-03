@@ -71,6 +71,7 @@ export const store = reactive({
     aoiMode: "none", // search-area source: "none" | "map" | "drawn"
     cropToAoi: false, // crop a downloaded feed to the selected area
     downloadDir: "", // optional folder for downloads (default: the cache)
+    browse: { open: false, path: "", parent: null, dirs: [], error: "" },
     limit: 50,
     results: [],
     searching: false,
