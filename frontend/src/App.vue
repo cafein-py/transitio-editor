@@ -6,6 +6,7 @@ import { createMap } from "./map.js";
 import { checkNetworkAvailable, loadCatalogue } from "./actions.js";
 import AgencyServiceForm from "./components/AgencyServiceForm.vue";
 import CataloguePanel from "./components/CataloguePanel.vue";
+import CurrentFeedBar from "./components/CurrentFeedBar.vue";
 import NetworkPanel from "./components/NetworkPanel.vue";
 import SearchPanel from "./components/SearchPanel.vue";
 import FeedSummary from "./components/FeedSummary.vue";
@@ -29,6 +30,9 @@ onMounted(() => {
   <div id="sidebar">
     <h1>transitio</h1>
     <TabBar />
+    <CurrentFeedBar
+      v-show="store.activeTab === 'edit' || store.activeTab === 'report'"
+    />
 
     <div v-show="store.activeTab === 'edit'">
       <FeedSummary />
