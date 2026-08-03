@@ -685,8 +685,18 @@ class _StubCatalog:
 
     def download_latest(self, feed, directory=None):
         self.downloaded.append(feed.id)
+        self.directories = getattr(self, "directories", [])
+        self.directories.append(directory)
         if self._download_path is None:
             raise RuntimeError("download unavailable")
+        if directory is not None:
+            # mirror the real client: the zip lands in the given directory
+            import shutil
+            from pathlib import Path
+
+            target = Path(directory) / Path(self._download_path).name
+            shutil.copy(self._download_path, target)
+            return target
         return self._download_path
 
 
@@ -945,6 +955,41 @@ def test_download_crop_writes_provenance(editor, tmp_path):
     data = json.loads(open(sidecar).read())
     assert data["aoi_bbox"] == _HELSINKI_AOI
     assert data["row_counts"]["stops.txt"] == 2 and data["source_dataset"]
+
+
+def test_download_into_chosen_directory(editor, tmp_path):
+    zip_path = _write_feed(tmp_path / "dl.zip", "d1", 60.4, 25.2)
+    stub = _StubCatalog([_catalog_feed()], token="tok", download_path=zip_path)
+    client = TestClient(create_app(editor, catalog_factory=lambda: stub))
+    client.get("/api/search")
+    target = tmp_path / "work" / "nyc"  # created on demand
+    entry = client.post(
+        "/api/catalogue/download",
+        json={"feed_id": "mdb-1", "directory": str(target)},
+    ).json()
+    assert stub.directories[-1] == target
+    assert entry["source"].startswith(str(target))
+    # a cropped download lands beside its zip in the same directory
+    two_area = _two_area_feed(tmp_path / "two.zip")
+    stub._download_path = two_area
+    cropped = client.post(
+        "/api/catalogue/download",
+        json={"feed_id": "mdb-1", "directory": str(target), "aoi": _HELSINKI_AOI},
+    ).json()
+    assert cropped["source"].startswith(str(target)) and ".aoi-" in cropped["source"]
+    # invalid directory values are rejected up front
+    assert (
+        client.post(
+            "/api/catalogue/download", json={"feed_id": "mdb-1", "directory": 5}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            "/api/catalogue/download", json={"feed_id": "mdb-1", "directory": "  "}
+        ).status_code
+        == 422
+    )
 
 
 def test_download_rejects_bad_aoi(editor):

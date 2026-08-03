@@ -569,6 +569,8 @@ function searchAoiBbox() {
 
 export async function downloadFeed(feed) {
   const body = { feed_id: feed.id, activate: true };
+  const directory = store.search.downloadDir.trim();
+  if (directory) body.directory = directory;
   if (store.search.cropToAoi) {
     const bbox = searchAoiBbox();
     if (!bbox) {

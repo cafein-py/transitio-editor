@@ -81,6 +81,10 @@ function sortArrow(key) {
         />
         crop downloaded feed to area
       </label>
+      <input
+        v-model="store.search.downloadDir"
+        placeholder="download folder (optional, default: cache)"
+      />
       <button class="primary" type="submit" :disabled="store.search.searching">
         {{ store.search.searching ? "Searching…" : "Search" }}
       </button>

@@ -70,6 +70,7 @@ export const store = reactive({
     officialOnly: false,
     aoiMode: "none", // search-area source: "none" | "map" | "drawn"
     cropToAoi: false, // crop a downloaded feed to the selected area
+    downloadDir: "", // optional folder for downloads (default: the cache)
     limit: 50,
     results: [],
     searching: false,

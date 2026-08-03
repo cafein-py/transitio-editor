@@ -860,6 +860,17 @@ def create_app(
         aoi = payload.get("aoi")
         if aoi is not None:
             aoi = _acquire_bbox(aoi)  # validate before touching the network
+        directory = payload.get("directory")
+        if directory is not None:
+            if not isinstance(directory, str) or not directory.strip():
+                raise HTTPException(422, "'directory' must be a non-empty string")
+            directory = Path(directory).expanduser()
+            try:
+                directory.mkdir(parents=True, exist_ok=True)
+            except OSError as error:
+                raise HTTPException(
+                    422, f"cannot use download directory: {error}"
+                ) from None
         feed = search_cache.get(feed_id)
         if feed is None:
             raise HTTPException(404, f"unknown feed {feed_id}; search for it first")
@@ -869,9 +880,10 @@ def create_app(
         from transitio.edit import FeedEditor
 
         # Download, optionally crop, and load outside the lock; only the
-        # registry insert needs it.
+        # registry insert needs it. A given directory replaces the transitio
+        # cache as the target (the AOI crop lands beside its download).
         try:
-            path = get_catalog().download_latest(feed)
+            path = get_catalog().download_latest(feed, directory=directory)
         except Exception as error:  # noqa: B902
             raise HTTPException(502, f"download failed: {error}") from None
         source = path
