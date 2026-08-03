@@ -18,6 +18,13 @@ const expandedGroup = ref(null);
 function toggleGroup(id) {
   expandedGroup.value = expandedGroup.value === id ? null : id;
 }
+
+// Switching the current feed clears the report, so an existing report is
+// always the current feed's.
+const feedName = computed(() => {
+  const current = store.catalogue.find((feed) => feed.current);
+  return current ? current.name : null;
+});
 </script>
 
 <template>
@@ -33,6 +40,7 @@ function toggleGroup(id) {
 
     <template v-else>
       <div class="panel report-summary">
+        <div v-if="feedName" class="report-feed">report for {{ feedName }}</div>
         <span class="count error">{{ counts.ERROR }} errors</span>
         <span class="count warning">{{ counts.WARNING }} warnings</span>
         <span class="count info">{{ counts.INFO }} infos</span>
