@@ -2038,9 +2038,7 @@ def test_bad_paths_are_client_errors(editor):
     # malformed-path handling portably: a 4xx, never an unhandled 500.
     nul_path = "bad" + chr(0) + "dir"
     client = TestClient(create_app(editor))
-    assert (
-        client.get("/api/fs/dirs", params={"path": nul_path}).status_code == 404
-    )
+    assert client.get("/api/fs/dirs", params={"path": nul_path}).status_code == 404
     stub = _StubCatalog([_catalog_feed()], token="tok")
     with_dir = TestClient(create_app(editor, catalog_factory=lambda: stub))
     assert (
