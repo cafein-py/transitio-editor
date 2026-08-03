@@ -49,6 +49,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Catalogue tab's per-feed summary counted stops and routes under the
+  wrong table keys and therefore always showed "0 stops, 0 routes"; it now
+  reads the filename-keyed counts the API serves.
 - The sidebar is wide enough (with slightly more compact tab buttons) for
   all five tabs to share one row, so the Report tab is no longer wrapped or
   cut off.

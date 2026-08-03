@@ -2,8 +2,10 @@
 // actions live in actions.js; these are the display-only functions.
 
 export function feedTableSummary(tables) {
-  const stops = (tables && tables.stops) || 0;
-  const routes = (tables && tables.routes) || 0;
+  // table counts are keyed by GTFS filename ("stops.txt"), as served by
+  // the catalogue endpoints
+  const stops = (tables && tables["stops.txt"]) || 0;
+  const routes = (tables && tables["routes.txt"]) || 0;
   const stopWord = stops === 1 ? "stop" : "stops";
   const routeWord = routes === 1 ? "route" : "routes";
   return `${stops} ${stopWord}, ${routes} ${routeWord}`;
