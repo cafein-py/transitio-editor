@@ -1,7 +1,7 @@
 <script setup>
 import { computed, watch } from "vue";
 import { store } from "../store.js";
-import { feedLocation, safeHttpUrl, sortFeeds } from "../search.js";
+import { feedLocation, isDownloaded, safeHttpUrl, sortFeeds } from "../search.js";
 import {
   clearAoi,
   downloadFeed,
@@ -116,8 +116,15 @@ function sortArrow(key) {
           <td>{{ feedLocation(feed) }}</td>
           <td>{{ feed.status || "—" }}</td>
           <td>
+            <span
+              v-if="isDownloaded(store.catalogue, feed.id)"
+              class="in-catalogue"
+              title="already in the catalogue"
+            >
+              ✔
+            </span>
             <button
-              v-if="feed.downloadable"
+              v-else-if="feed.downloadable"
               class="download"
               :disabled="store.search.downloadingId === feed.id"
               @click="downloadFeed(feed)"

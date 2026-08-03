@@ -76,6 +76,7 @@ table.times input { width: 76px; padding: 3px; }
 .search-table .official { color: #2c7a3d; margin-left: 4px; }
 .search-table a { margin-left: 6px; font-size: 11px; }
 .search-table .download { padding: 2px 8px; font-size: 11px; }
+.search-table .in-catalogue { color: #2c7a3d; font-weight: 700; }
 .search code { background: #eee; padding: 0 3px; border-radius: 3px; }
 .search-area { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 4px 0; }
 .search-area select { font-size: 12px; }

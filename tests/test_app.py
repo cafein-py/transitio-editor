@@ -794,6 +794,11 @@ def test_download_adds_searched_feed_to_catalogue(editor, tmp_path):
     assert added.status_code == 200
     entry = added.json()
     assert entry["name"] == "HSL" and entry["active"] is True
+    # the origin records the Mobility DB id, so the search list can mark
+    # already-downloaded feeds; locally loaded feeds carry no origin
+    assert entry["origin"] == "mdb-1"
+    local = client.get("/api/catalogue").json()["feeds"][0]
+    assert local["origin"] is None
     assert stub.downloaded == ["mdb-1"]
 
     feeds = client.get("/api/catalogue").json()["feeds"]

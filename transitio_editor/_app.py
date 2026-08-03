@@ -929,6 +929,7 @@ def create_app(
                 loaded,
                 feed.provider or feed.id,
                 source=os.fspath(source),
+                origin=feed.id,
             )
             entry.active = activate
             return entry_dict(entry, registry)

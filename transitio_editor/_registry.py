@@ -25,12 +25,15 @@ _PALETTE = [
 class FeedEntry:
     """One loaded feed and its display state."""
 
-    def __init__(self, feed_id, editor, name, color, source=None):
+    def __init__(self, feed_id, editor, name, color, source=None, origin=None):
         self.feed_id = feed_id
         self.editor = editor
         self.name = name
         self.color = color
         self.source = source
+        # The Mobility Database feed id this entry was downloaded from (None
+        # for locally loaded feeds); lets the search list mark downloaded ones.
+        self.origin = origin
         self.active = True
 
 
@@ -42,11 +45,11 @@ class FeedRegistry:
         self.current = None
         self._counter = 0
 
-    def add(self, editor, name, source=None):
+    def add(self, editor, name, source=None, origin=None):
         self._counter += 1
         feed_id = f"feed-{self._counter}"
         color = _PALETTE[(self._counter - 1) % len(_PALETTE)]
-        entry = FeedEntry(feed_id, editor, name, color, source)
+        entry = FeedEntry(feed_id, editor, name, color, source, origin)
         self._feeds[feed_id] = entry
         if self.current is None:
             self.current = feed_id
@@ -88,6 +91,7 @@ def entry_dict(entry, registry):
         "color": entry.color,
         "current": registry.current == entry.feed_id,
         "source": entry.source,
+        "origin": entry.origin,
         "tables": {
             name: len(table) for name, table in sorted(entry.editor.tables.items())
         },

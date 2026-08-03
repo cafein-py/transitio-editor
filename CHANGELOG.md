@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A "show stops" toggle: the Edit tab's legend panel (now "Map display")
   can hide the stop markers independently of the route shapes.
+- Search results that are already in the catalogue show a green check
+  instead of the Download button (removing the feed from the catalogue
+  brings the button back), so it is easy to see which of an area's many
+  feeds still need downloading. Catalogue entries record the Mobility
+  Database id they were downloaded from (`origin` in the catalogue API).
 - A current-feed bar on the Edit and Report tabs: with several feeds in the
   catalogue, the feed that edits, validation and save target is now always
   visible (color swatch + name) and switchable in place; the validation
