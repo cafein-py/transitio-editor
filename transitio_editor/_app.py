@@ -831,10 +831,11 @@ def create_app(
         # Directory listing for the download-folder browser. Same local-file
         # trust model as loading a feed from a path or saving to one: the
         # loopback single user browses their own machine.
-        base = Path(path).expanduser() if path else Path.home()
         try:
+            base = Path(path).expanduser() if path else Path.home()
             base = base.resolve()
-        except (OSError, RuntimeError, ValueError) as error:
+        except (OSError, RuntimeError, ValueError, KeyError) as error:
+            # unknown ~user, symlink loops, NUL bytes: a clean 404, not a 500
             raise HTTPException(404, f"cannot resolve: {error}") from None
         if not base.is_dir():
             raise HTTPException(404, f"not a directory: {base}")
@@ -899,10 +900,10 @@ def create_app(
         if directory is not None:
             if not isinstance(directory, str) or not directory.strip():
                 raise HTTPException(422, "'directory' must be a non-empty string")
-            directory = Path(directory).expanduser()
             try:
+                directory = Path(directory).expanduser()
                 directory.mkdir(parents=True, exist_ok=True)
-            except OSError as error:
+            except (OSError, RuntimeError, ValueError, KeyError) as error:
                 raise HTTPException(
                     422, f"cannot use download directory: {error}"
                 ) from None

@@ -20,6 +20,15 @@ let map = null;
 // mode or feed color; the false filter means "nothing selected".
 const SELECT_COLOR = "#ffd60a";
 const NO_SELECTION = ["boolean", false];
+// The shapes' selection and report-highlight layers must respect the mode
+// filter too, or a hidden mode's shape stays visible through its overlay.
+let shapesModeFilter = null;
+let selectedShapeFilter = NO_SELECTION;
+let highlightShapesFilter = ["in", ["get", "shape_id"], ["literal", []]];
+
+function withModeFilter(filter) {
+  return shapesModeFilter ? ["all", shapesModeFilter, filter] : filter;
+}
 // Resolves once the map's sources and layers exist, so network data applied
 // from actions never races the map "load" event.
 let resolveMapReady;
@@ -162,6 +171,15 @@ async function refreshSummary() {
   // so the Catalogue tab doesn't show stale counts after a mutation.
   const entry = store.catalogue.find((f) => f.feed_id === store.currentFeedId);
   if (entry) entry.tables = summary.tables;
+  // Re-fetch the catalogue so derived per-feed info (mode chips) follows
+  // edits like adding a route with a new transport type.
+  try {
+    const catalogue = await api("GET", "/api/catalogue");
+    store.catalogue = catalogue.feeds;
+    store.currentFeedId = catalogue.current;
+  } catch (error) {
+    /* summary already updated; catalogue refresh is best-effort */
+  }
 }
 export { refreshSummary };
 
@@ -201,7 +219,8 @@ export function setHighlight(stopIds, shapeIds) {
     return feedId ? ["all", ["==", ["get", "feed_id"], feedId], match] : match;
   };
   map.setFilter("stops-highlight", scoped("stop_id", stopIds));
-  map.setFilter("shapes-highlight", scoped("shape_id", shapeIds));
+  highlightShapesFilter = scoped("shape_id", shapeIds);
+  map.setFilter("shapes-highlight", withModeFilter(highlightShapesFilter));
   store.highlightActive = stopIds.length > 0 || shapeIds.length > 0;
 }
 
@@ -523,7 +542,12 @@ export function createMap() {
         if (own) properties = own.properties;
       }
       if (!properties) properties = event.features[0].properties;
-      if (store.currentFeedId && properties.feed_id !== store.currentFeedId) {
+      if (
+        store.editMode &&
+        store.currentFeedId &&
+        properties.feed_id !== store.currentFeedId
+      ) {
+        // Editing targets the current feed; viewing may select any feed.
         store.status = "that stop belongs to another feed; make it current to edit it";
         event.preventDefault();
         return;
@@ -537,6 +561,7 @@ export function createMap() {
         store.inspector = {
           stopId: properties.stop_id,
           name: properties.stop_name || "",
+          feedId: properties.feed_id || null,
         };
         setSelectedStop(properties);
       }
@@ -866,16 +891,14 @@ export function setSelectedStop(properties) {
 
 export function setSelectedShape(properties) {
   if (!map || !map.getLayer("shapes-selected")) return;
-  map.setFilter(
-    "shapes-selected",
-    properties
-      ? [
-          "all",
-          ["==", ["get", "shape_id"], properties.shape_id],
-          ["==", ["get", "feed_id"], properties.feed_id],
-        ]
-      : NO_SELECTION,
-  );
+  selectedShapeFilter = properties
+    ? [
+        "all",
+        ["==", ["get", "shape_id"], properties.shape_id],
+        ["==", ["get", "feed_id"], properties.feed_id],
+      ]
+    : NO_SELECTION;
+  map.setFilter("shapes-selected", withModeFilter(selectedShapeFilter));
 }
 
 export function setSelectedNetworkFeature(properties) {
@@ -910,7 +933,11 @@ export function setShapeColorBy(colorBy) {
 
 export function setHiddenModes(hiddenCodes) {
   if (!map || !map.getLayer("shapes")) return;
-  const filter = modeFilterExpression(hiddenCodes);
-  map.setFilter("shapes", filter);
-  map.setFilter("shapes-casing", filter); // the casing mirrors its line
+  shapesModeFilter = modeFilterExpression(hiddenCodes);
+  map.setFilter("shapes", shapesModeFilter);
+  map.setFilter("shapes-casing", shapesModeFilter); // the casing mirrors its line
+  // Overlays follow: a hidden mode's shape must not shine through its
+  // selection halo or report highlight.
+  map.setFilter("shapes-selected", withModeFilter(selectedShapeFilter));
+  map.setFilter("shapes-highlight", withModeFilter(highlightShapesFilter));
 }

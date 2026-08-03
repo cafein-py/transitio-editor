@@ -92,7 +92,7 @@ def base_route_type(value):
         code = int(str(value).strip())
     except (TypeError, ValueError):
         return None
-    if 0 <= code <= 12:
+    if code in (0, 1, 2, 3, 4, 5, 6, 7, 11, 12):  # defined base types only
         return code
     if 100 <= code < 200:  # railway service
         return 2

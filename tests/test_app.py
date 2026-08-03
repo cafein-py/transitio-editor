@@ -2019,3 +2019,33 @@ def test_table_search_filters_rows(editor):
     # blank q is a no-op
     full = client.get("/api/tables/stops.txt", params={"q": "  "}).json()
     assert full["total"] == 2
+
+
+def test_reserved_route_types_normalise_to_unknown():
+    from transitio_editor._registry import base_route_type
+
+    # defined base codes pass through; reserved 8-10 and junk yield None
+    assert [base_route_type(code) for code in (0, 7, 11, 12)] == [0, 7, 11, 12]
+    assert base_route_type(8) is None
+    assert base_route_type(9) is None
+    assert base_route_type(10) is None
+    assert base_route_type("x") is None
+
+
+def test_bad_paths_are_client_errors(editor):
+    client = TestClient(create_app(editor))
+    # an unknown ~user must not become a 500 in the folder browser…
+    assert (
+        client.get("/api/fs/dirs", params={"path": "~no-such-user-xyz/dir"}).status_code
+        == 404
+    )
+    # …nor in the download-directory handling
+    stub = _StubCatalog([_catalog_feed()], token="tok")
+    with_dir = TestClient(create_app(editor, catalog_factory=lambda: stub))
+    assert (
+        with_dir.post(
+            "/api/catalogue/download",
+            json={"feed_id": "mdb-1", "directory": "~no-such-user-xyz/dir"},
+        ).status_code
+        == 422
+    )

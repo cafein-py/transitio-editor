@@ -1,9 +1,9 @@
 <script setup>
 import { store } from "../store.js";
 
-// Ordered to follow the workflow: find data (Search), manage what's loaded
-// (Data), explore it read-only (View), edit the current feed (Edit), edit
-// the OSM network (OSM), validate the result (Report).
+// Ordered to follow the workflow: find data (Search), manage what is
+// loaded (Data), explore or edit it (View/Edit, gated by the editing
+// switch), edit the OSM network (OSM), validate the result (Report).
 const TABS = [
   { key: "search", label: "Search" },
   { key: "catalogue", label: "Data" },

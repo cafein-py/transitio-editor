@@ -4,6 +4,7 @@
 import { api } from "./api.js";
 import * as mapBridge from "./map.js";
 import { MODES, UNKNOWN_MODE } from "./modes.js";
+import { isDownloaded } from "./search.js";
 import { forms, resetForms, store } from "./store.js";
 
 export async function checkNetworkAvailable() {
@@ -317,6 +318,8 @@ export function toggleEditMode() {
   if (!store.editMode) setMode("select");
 }
 
+let tableSeq = 0; // only the latest table request may write the view
+
 export async function loadTable(patch = {}) {
   const view = store.tableView;
   Object.assign(view, patch);
@@ -325,6 +328,7 @@ export async function loadTable(patch = {}) {
     if (!files.length) return;
     view.file = files[0];
   }
+  const seq = ++tableSeq;
   view.loading = true;
   try {
     const params = new URLSearchParams({
@@ -336,14 +340,29 @@ export async function loadTable(patch = {}) {
       "GET",
       `/api/tables/${encodeURIComponent(view.file)}?${params.toString()}`,
     );
+    if (seq !== tableSeq) return; // a newer request superseded this one
     view.total = body.total;
     view.columns = body.columns;
     view.rows = body.rows;
   } catch (error) {
-    store.status = error.message;
+    if (seq === tableSeq) store.status = error.message;
   } finally {
-    view.loading = false;
+    if (seq === tableSeq) view.loading = false;
   }
+}
+
+export function resetTableView() {
+  tableSeq += 1; // invalidate any in-flight request
+  Object.assign(store.tableView, {
+    open: false,
+    file: "",
+    q: "",
+    offset: 0,
+    total: 0,
+    columns: [],
+    rows: [],
+    loading: false,
+  });
 }
 
 export function toggleTableView() {
@@ -389,6 +408,12 @@ export const updateInspectedStop = wrap(async () => {
   });
   await mapBridge.refreshAll(false);
 });
+
+export function closeInspector() {
+  store.inspector = null;
+  store.movingStop = null;
+  mapBridge.setSelectedStop(null); // the halo follows the selection
+}
 
 export function startMovingStop() {
   store.movingStop = store.inspector.stopId;
@@ -524,6 +549,7 @@ function resetFeedScopedState() {
   setMode("select"); // also clears movingStop and the draw preview
   store.inspector = null;
   mapBridge.clearFeedSelection();
+  resetTableView();
   store.tripStops.length = 0;
   store.tripPicking = false;
   store.trip = null;
@@ -583,6 +609,7 @@ export async function removeFeed(feed) {
 export async function runSearch() {
   const s = store.search;
   s.searching = true;
+  s.selected = []; // old selections must not survive into new results
   s.searched = true;
   try {
     const params = new URLSearchParams();
@@ -595,7 +622,6 @@ export async function runSearch() {
     params.set("limit", String(s.limit));
     const body = await api("GET", `/api/search?${params.toString()}`);
     s.results = body.feeds;
-    s.selected = []; // a new result set invalidates the bulk selection
     s.csvFallback = body.csv_fallback;
     // Don't silently drop a requested area filter.
     store.status =
@@ -704,6 +730,14 @@ export async function downloadSelected() {
   const failed = [];
   try {
     for (const feed of queue) {
+      // Re-check against the live catalogue: a feed downloaded individually
+      // (or made undownloadable) since selection must not download again.
+      if (!feed.downloadable || isDownloaded(store.catalogue, feed.id)) {
+        const stale = s.selected.indexOf(feed.id);
+        if (stale !== -1) s.selected.splice(stale, 1);
+        s.bulk.done += 1;
+        continue;
+      }
       const body = downloadBody(feed);
       if (!body) break; // settings changed mid-run; keep remaining selected
       s.downloadingId = feed.id;
