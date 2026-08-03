@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A "show stops" toggle: the Edit tab's legend panel (now "Map display")
+  can hide the stop markers independently of the route shapes; the panel
+  starts open so the mode legend is immediately visible.
+- Catalogue entries show which transport modes a feed contains, as colored
+  chips matching the map legend (from a new `modes` field in the catalogue
+  API: the distinct normalised route types among the feed's routes).
+- An optional download folder on the Search tab: downloaded feeds (and
+  their AOI-cropped copies) land there instead of the transitio cache; the
+  folder is created on demand (`directory` on `POST
+  /api/catalogue/download`). A Browse… button opens a server-side folder
+  browser (`GET /api/fs/dirs`) to pick the folder by navigation instead of
+  typing a path — a page cannot read absolute paths from the native
+  picker, but the loopback backend can list the user's own directories.
+- Bulk download: search results have checkboxes (with a select-all header
+  for everything downloadable) and a "Download selected" button fetches
+  them one by one with the tab's folder and crop settings — progress in
+  the button, a green check per landed feed, and a summary naming any
+  failures without aborting the rest.
+- Search results that are already in the catalogue show a green check
+  instead of the Download button (removing the feed from the catalogue
+  brings the button back), so it is easy to see which of an area's many
+  feeds still need downloading. Catalogue entries record the Mobility
+  Database id they were downloaded from (`origin` in the catalogue API).
 - A current-feed bar on the Edit and Report tabs: with several feeds in the
   catalogue, the feed that edits, validation and save target is now always
   visible (color swatch + name) and switchable in place; the validation
@@ -21,14 +44,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   loaded, its node/way counts.
 - Route shapes are colored by transport mode (tram, metro, rail, bus,
   ferry, cable tram, aerial lift, funicular, trolleybus, monorail), with a
-  collapsible "Route colors" legend on the Edit tab whose checkboxes hide
-  or show each mode and a color-by mode/feed switch that restores the
-  per-feed coloring for overlaid feeds. `/api/shapes` features now carry a
-  `route_type` resolved through each shape's trips, with extended
-  (Google-extension) route types normalised to their base families.
+  collapsible legend on the Edit tab whose checkboxes hide or show each
+  mode and a color-by mode/feed switch that restores the per-feed coloring
+  for overlaid feeds. The palette is colorblind-validated (OKLab CVD
+  separation checked across co-occurring pairs against the basemap tone),
+  the common modes follow widely used semantic transit colors (blue bus,
+  green tram, orange metro, purple rail, cyan ferry), and a white casing
+  under the lines keeps them readable on the busy basemap. `/api/shapes`
+  features now carry a `route_type` resolved through each shape's trips,
+  with extended (Google-extension) route types normalised to their base
+  families.
+
+### Added
+
+- An attribute table below the map: a floating "Table" button opens a
+  panel listing any GTFS file's rows (stops, routes, trips, …) for the
+  current feed, with a file selector, a search box filtering across every
+  column (server-side, `q` on `GET /api/tables/{name}`) and paging.
+- Hovering a stop or route shape while viewing opens an attribute card
+  with its key fields; clicking a shape pins the card. Features are
+  selectable whether editing is on or off.
+- Selection halos: the selected stop, route shape, or OSM node/way is
+  marked on the map with an amber underlay, cleared when the selection is
+  dropped (card closed, feed switched, element deleted, network reset).
 
 ### Changed
 
+- The View and Edit tabs merge into one View/Edit tab with an "editing
+  mode" switch: viewing is the default, and flipping the switch reveals
+  the editing forms in the sidebar plus floating map buttons (Select,
+  + Stop, + Shape with snapping) over the map. Feed-mutating map clicks
+  fire only while the switch is on, and the stop inspector is read-only
+  without it. The sidebar tabs follow the workflow left to right —
+  Search, Data (the catalogue), View/Edit, OSM (the network tab),
+  Report — and the editor opens on View/Edit.
+- Downloading a feed no longer switches the view to the Catalogue tab, so
+  several of an area's feeds can be downloaded in a row without the GUI
+  bouncing away from the search results.
+- Routes whose type could not be determined are a toggleable "other /
+  unknown" legend row of their own — hidden by default so unclassifiable
+  lines don't clutter the map — instead of staying always visible, and the
+  shape-to-route join tolerates stray whitespace in feed id columns. The
+  legend lists only modes that exist in the loaded feeds and gains
+  select-all / deselect-all buttons.
 - The default `--max-network-ways` guard is 200000 (was 50000), so a
   mid-size city's routable network — e.g. Oulu at ~86k ways — loads without
   tripping the limit when acquired from the GUI; the limit error now also
@@ -36,6 +94,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Catalogue tab's per-feed summary counted stops and routes under the
+  wrong table keys and therefore always showed "0 stops, 0 routes"; it now
+  reads the filename-keyed counts the API serves.
 - The sidebar is wide enough (with slightly more compact tab buttons) for
   all five tabs to share one row, so the Report tab is no longer wrapped or
   cut off.

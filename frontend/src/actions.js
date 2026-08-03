@@ -3,6 +3,8 @@
 // the status line and marks the validation report stale.
 import { api } from "./api.js";
 import * as mapBridge from "./map.js";
+import { MODES, UNKNOWN_MODE } from "./modes.js";
+import { isDownloaded } from "./search.js";
 import { forms, resetForms, store } from "./store.js";
 
 export async function checkNetworkAvailable() {
@@ -67,6 +69,7 @@ export async function deleteNetworkWay() {
   try {
     await api("DELETE", `/api/network/ways/${selected.id}`);
     store.network.selected = null;
+    mapBridge.setSelectedNetworkFeature(null);
     await mapBridge.fetchNetwork();
     store.status = "";
   } catch (error) {
@@ -103,6 +106,7 @@ export async function deleteNetworkNode() {
   try {
     await api("DELETE", `/api/network/nodes/${selected.id}`);
     store.network.selected = null;
+    mapBridge.setSelectedNetworkFeature(null);
     await mapBridge.fetchNetwork();
     store.status = "";
   } catch (error) {
@@ -140,6 +144,7 @@ export async function resetNetwork() {
   try {
     await api("POST", "/api/network/reset");
     store.network.selected = null;
+    mapBridge.setSelectedNetworkFeature(null);
     setNetworkMode("select"); // clears an in-progress draw and its preview
     await mapBridge.fetchNetwork();
     store.status = "network edits discarded";
@@ -240,6 +245,7 @@ export async function acquireOsm(discardEdits = false) {
   net.available = true;
   net.loaded = false;
   net.selected = null;
+  mapBridge.setSelectedNetworkFeature(null);
   net.error = "";
   setNetworkMode("select"); // clears any in-progress draw/move
   try {
@@ -269,6 +275,11 @@ export function toggleFeedVisible() {
   mapBridge.setFeedVisible(store.feedVisible);
 }
 
+export function toggleStopsVisible() {
+  store.stopsVisible = !store.stopsVisible;
+  mapBridge.setStopsVisible(store.stopsVisible);
+}
+
 export function setShapeColorBy(colorBy) {
   store.shapeColorBy = colorBy;
   mapBridge.setShapeColorBy(colorBy);
@@ -282,6 +293,12 @@ export function toggleModeHidden(code) {
   mapBridge.setHiddenModes([...hidden]);
 }
 
+export function setAllModesHidden(hidden) {
+  const codes = hidden ? [...MODES.map((mode) => mode.code), UNKNOWN_MODE.code] : [];
+  store.hiddenModes.splice(0, store.hiddenModes.length, ...codes);
+  mapBridge.setHiddenModes([...store.hiddenModes]);
+}
+
 export function wrap(action) {
   return async (...args) => {
     try {
@@ -292,6 +309,69 @@ export function wrap(action) {
       store.status = error.message;
     }
   };
+}
+
+export function toggleEditMode() {
+  store.editMode = !store.editMode;
+  // Leaving edit mode disarms any pending map mutation (add stop, draw,
+  // move, trip-stop picking) so the read-only view really is read-only.
+  if (!store.editMode) {
+    setMode("select");
+    store.tripPicking = false;
+  }
+}
+
+let tableSeq = 0; // only the latest table request may write the view
+
+export async function loadTable(patch = {}) {
+  const view = store.tableView;
+  Object.assign(view, patch);
+  if (!view.file) {
+    const files = Object.keys(store.tables);
+    if (!files.length) return;
+    view.file = files[0];
+  }
+  const seq = ++tableSeq;
+  view.loading = true;
+  try {
+    const params = new URLSearchParams({
+      offset: String(view.offset),
+      limit: String(view.limit),
+    });
+    if (view.q.trim()) params.set("q", view.q.trim());
+    const body = await api(
+      "GET",
+      `/api/tables/${encodeURIComponent(view.file)}?${params.toString()}`,
+    );
+    if (seq !== tableSeq) return; // a newer request superseded this one
+    view.total = body.total;
+    view.columns = body.columns;
+    view.rows = body.rows;
+  } catch (error) {
+    if (seq === tableSeq) store.status = error.message;
+  } finally {
+    if (seq === tableSeq) view.loading = false;
+  }
+}
+
+export function resetTableView() {
+  tableSeq += 1; // invalidate any in-flight request
+  Object.assign(store.tableView, {
+    open: false,
+    file: "",
+    q: "",
+    offset: 0,
+    total: 0,
+    columns: [],
+    rows: [],
+    loading: false,
+  });
+}
+
+export function toggleTableView() {
+  const view = store.tableView;
+  view.open = !view.open;
+  if (view.open) loadTable({ offset: 0 });
 }
 
 export function setMode(mode) {
@@ -312,14 +392,16 @@ export function cancelShape() {
 }
 
 export const finishShape = wrap(async () => {
-  if (mapBridge.getPreviewCoords().length < 2) {
+  // Wait out any in-flight snap so the newest drawn point is included.
+  const coords = await mapBridge.previewCoordsSettled();
+  if (coords.length < 2) {
     throw new Error("draw at least two points first");
   }
   const shapeId = prompt("shape_id?");
   if (!shapeId) return;
   await api("POST", "/api/shapes", {
     shape_id: shapeId,
-    points: mapBridge.getPreviewCoords().map(([lon, lat]) => [lat, lon]),
+    points: coords.map(([lon, lat]) => [lat, lon]),
   });
   cancelShape();
   await mapBridge.refreshAll(false);
@@ -331,6 +413,12 @@ export const updateInspectedStop = wrap(async () => {
   });
   await mapBridge.refreshAll(false);
 });
+
+export function closeInspector() {
+  store.inspector = null;
+  store.movingStop = null;
+  mapBridge.setSelectedStop(null); // the halo follows the selection
+}
 
 export function startMovingStop() {
   store.movingStop = store.inspector.stopId;
@@ -465,6 +553,8 @@ export async function addFeed() {
 function resetFeedScopedState() {
   setMode("select"); // also clears movingStop and the draw preview
   store.inspector = null;
+  mapBridge.clearFeedSelection();
+  resetTableView();
   store.tripStops.length = 0;
   store.tripPicking = false;
   store.trip = null;
@@ -524,6 +614,7 @@ export async function removeFeed(feed) {
 export async function runSearch() {
   const s = store.search;
   s.searching = true;
+  s.selected = []; // old selections must not survive into new results
   s.searched = true;
   try {
     const params = new URLSearchParams();
@@ -555,28 +646,131 @@ function searchAoiBbox() {
   return null;
 }
 
-export async function downloadFeed(feed) {
+// The request body for downloading one feed with the tab's settings, or
+// null (with a status hint) when a requested crop has no area to crop to.
+function downloadBody(feed) {
   const body = { feed_id: feed.id, activate: true };
+  const directory = store.search.downloadDir.trim();
+  if (directory) body.directory = directory;
   if (store.search.cropToAoi) {
     const bbox = searchAoiBbox();
     if (!bbox) {
       // Don't silently download the full feed when a crop was asked for.
       store.status = "select or draw an area to crop to, or uncheck crop";
-      return;
+      return null;
     }
     body.aoi = bbox;
   }
+  return body;
+}
+
+export async function downloadFeed(feed) {
+  const body = downloadBody(feed);
+  if (!body) return;
   store.search.downloadingId = feed.id;
   try {
     await api("POST", "/api/catalogue/download", body);
     await loadCatalogue();
     await mapBridge.refreshAll(true);
-    store.activeTab = "catalogue";
+    // Stay on the Search tab: downloading many of an area's feeds in a row
+    // shouldn't bounce the view to the Catalogue each time. The green check
+    // on the result row and the status line confirm the download.
     store.status = `downloaded ${feed.provider || feed.id}`;
   } catch (error) {
     store.status = error.message;
   } finally {
     store.search.downloadingId = null;
+  }
+}
+
+// Server-side folder browser for the download directory (a web page cannot
+// read absolute paths from a native picker; the loopback backend can).
+export async function openDirBrowser(path) {
+  const browse = store.search.browse;
+  const query = path ? `?path=${encodeURIComponent(path)}` : "";
+  try {
+    const listing = await api("GET", `/api/fs/dirs${query}`);
+    Object.assign(browse, {
+      open: true,
+      path: listing.path,
+      parent: listing.parent,
+      dirs: listing.dirs,
+      error: "",
+    });
+  } catch (error) {
+    browse.open = true;
+    browse.error = error.message;
+  }
+}
+
+export function closeDirBrowser() {
+  store.search.browse.open = false;
+}
+
+export function chooseBrowsedDir() {
+  store.search.downloadDir = store.search.browse.path;
+  store.search.browse.open = false;
+}
+
+export function toggleFeedSelected(feedId) {
+  const selected = store.search.selected;
+  const index = selected.indexOf(feedId);
+  if (index === -1) selected.push(feedId);
+  else selected.splice(index, 1);
+}
+
+export function setAllSelected(feeds, on) {
+  store.search.selected = on ? feeds.map((feed) => feed.id) : [];
+}
+
+// Download every selected result sequentially, keeping going on failures
+// and reporting a summary; each success gets its green check as it lands.
+export async function downloadSelected() {
+  const s = store.search;
+  if (s.bulk.running || !s.selected.length) return;
+  const queue = s.results.filter((feed) => s.selected.includes(feed.id));
+  if (!queue.length) return;
+  // Snapshot the folder/crop settings once: a mid-run change to the
+  // controls must not alter (or abort) the remaining queue.
+  const template = downloadBody(queue[0]);
+  if (!template) return; // crop misconfigured
+  s.bulk = { running: true, done: 0, total: queue.length };
+  const failed = [];
+  let skipped = 0;
+  try {
+    for (const feed of queue) {
+      // Re-check against the live catalogue: a feed downloaded individually
+      // (or made undownloadable) since selection must not download again.
+      if (!feed.downloadable || isDownloaded(store.catalogue, feed.id)) {
+        const stale = s.selected.indexOf(feed.id);
+        if (stale !== -1) s.selected.splice(stale, 1);
+        s.bulk.done += 1;
+        skipped += 1;
+        continue;
+      }
+      const body = { ...template, feed_id: feed.id };
+      s.downloadingId = feed.id;
+      try {
+        await api("POST", "/api/catalogue/download", body);
+        await loadCatalogue();
+        const index = s.selected.indexOf(feed.id);
+        if (index !== -1) s.selected.splice(index, 1);
+      } catch (error) {
+        failed.push(feed.provider || feed.id);
+      } finally {
+        s.downloadingId = null;
+        s.bulk.done += 1;
+      }
+    }
+    await mapBridge.refreshAll(true);
+    const ok = s.bulk.done - failed.length - skipped;
+    let summary = failed.length
+      ? `downloaded ${ok} of ${s.bulk.total} feeds — failed: ${failed.join(", ")}`
+      : `downloaded ${ok} feeds`;
+    if (skipped) summary += ` (${skipped} already in the catalogue)`;
+    store.status = summary;
+  } finally {
+    s.bulk = { running: false, done: 0, total: 0 };
   }
 }
 

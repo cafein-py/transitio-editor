@@ -3,14 +3,20 @@ import { onMounted } from "vue";
 
 import { store } from "./store.js";
 import { createMap } from "./map.js";
-import { checkNetworkAvailable, loadCatalogue } from "./actions.js";
+import {
+  checkNetworkAvailable,
+  loadCatalogue,
+  toggleEditMode,
+  toggleTableView,
+} from "./actions.js";
 import AgencyServiceForm from "./components/AgencyServiceForm.vue";
+import AttributeTable from "./components/AttributeTable.vue";
 import CataloguePanel from "./components/CataloguePanel.vue";
 import CurrentFeedBar from "./components/CurrentFeedBar.vue";
 import NetworkPanel from "./components/NetworkPanel.vue";
 import SearchPanel from "./components/SearchPanel.vue";
 import FeedSummary from "./components/FeedSummary.vue";
-import ModeBar from "./components/ModeBar.vue";
+import MapToolbar from "./components/MapToolbar.vue";
 import RouteForm from "./components/RouteForm.vue";
 import RouteLegend from "./components/RouteLegend.vue";
 import SaveBar from "./components/SaveBar.vue";
@@ -32,19 +38,29 @@ onMounted(() => {
     <h1>transitio</h1>
     <TabBar />
     <CurrentFeedBar
-      v-show="store.activeTab === 'edit' || store.activeTab === 'report'"
+      v-show="store.activeTab === 'view' || store.activeTab === 'report'"
     />
 
-    <div v-show="store.activeTab === 'edit'">
+    <!-- View/Edit: explore the loaded data; flip the switch to edit it. -->
+    <div v-show="store.activeTab === 'view'">
+      <label class="check edit-switch">
+        <input
+          type="checkbox"
+          :checked="store.editMode"
+          @change="toggleEditMode"
+        />
+        editing mode
+      </label>
       <FeedSummary />
       <RouteLegend />
-      <ModeBar />
       <StopInspector />
-      <RouteForm />
-      <TripForm />
-      <AgencyServiceForm />
-      <TimetablePanel />
-      <SaveBar />
+      <template v-if="store.editMode">
+        <RouteForm />
+        <TripForm />
+        <AgencyServiceForm />
+        <TimetablePanel />
+        <SaveBar />
+      </template>
     </div>
 
     <NetworkPanel v-show="store.activeTab === 'network'" />
@@ -57,5 +73,18 @@ onMounted(() => {
 
     <div id="status">{{ store.status }}</div>
   </div>
-  <div id="map"></div>
+  <div id="main">
+    <div id="map-wrap">
+      <div id="map"></div>
+      <MapToolbar />
+      <button
+        v-if="store.activeTab === 'view'"
+        class="table-toggle"
+        @click="toggleTableView"
+      >
+        {{ store.tableView.open ? "Hide table" : "Table" }}
+      </button>
+    </div>
+    <AttributeTable />
+  </div>
 </template>

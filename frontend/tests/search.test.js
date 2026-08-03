@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { feedLocation, safeHttpUrl, sortFeeds } from "../src/search.js";
+import { feedLocation, isDownloaded, safeHttpUrl, selectableFeeds, sortFeeds } from "../src/search.js";
 
 const feed = (provider, locations, status = "active") => ({
   id: provider.toLowerCase(),
@@ -71,5 +71,33 @@ describe("sortFeeds", () => {
     const copy = sortFeeds(feeds, "nope", "asc");
     expect(copy).not.toBe(feeds);
     expect(copy.map((f) => f.provider)).toEqual(["Zebra", "Alpha"]);
+  });
+});
+
+describe("isDownloaded", () => {
+  const catalogue = [
+    { feed_id: "feed-1", origin: "mdb-516" },
+    { feed_id: "feed-2", origin: null }, // locally loaded
+  ];
+
+  it("marks results whose Mobility DB id is in the catalogue", () => {
+    expect(isDownloaded(catalogue, "mdb-516")).toBe(true);
+    expect(isDownloaded(catalogue, "mdb-999")).toBe(false);
+    expect(isDownloaded([], "mdb-516")).toBe(false);
+  });
+});
+
+describe("selectableFeeds", () => {
+  const catalogue = [{ feed_id: "feed-1", origin: "mdb-1" }];
+  const results = [
+    { id: "mdb-1", downloadable: true }, // already in the catalogue
+    { id: "mdb-2", downloadable: true },
+    { id: "mdb-3", downloadable: false },
+  ];
+
+  it("keeps only downloadable results not yet in the catalogue", () => {
+    expect(selectableFeeds(results, catalogue).map((feed) => feed.id)).toEqual([
+      "mdb-2",
+    ]);
   });
 });

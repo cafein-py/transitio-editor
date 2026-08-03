@@ -5,6 +5,9 @@ from __future__ import annotations
 import math
 import os
 
+# shared with the catalogue's per-feed mode summary
+from transitio_editor._registry import base_route_type as _base_route_type
+
 
 def _geojson_feature(geometry_mapping, properties):
     return {"type": "Feature", "geometry": geometry_mapping, "properties": properties}
@@ -45,45 +48,9 @@ def _write_sidecar(path, text):
         raise
 
 
-def _base_route_type(value):
-    """Normalise a GTFS route_type (incl. extended codes) to a base mode.
-
-    Extended types (Google extension, 100-1799) map onto their base GTFS
-    family so the frontend only sees codes 0-12; unknown values yield None.
-    """
-    try:
-        code = int(str(value).strip())
-    except (TypeError, ValueError):
-        return None
-    if 0 <= code <= 12:
-        return code
-    if 100 <= code < 200:  # railway service
-        return 2
-    if 200 <= code < 300:  # coach service
-        return 3
-    if 300 <= code < 400:  # suburban railway service
-        return 2
-    if code == 405:  # monorail
-        return 12
-    if 400 <= code < 500:  # urban railway / metro service
-        return 1
-    if 500 <= code < 700:  # metro / underground service
-        return 1
-    if 700 <= code < 800:  # bus service
-        return 3
-    if code == 800:  # trolleybus service
-        return 11
-    if 900 <= code < 1000:  # tram service
-        return 0
-    if 1000 <= code < 1100:  # water transport service
-        return 4
-    if 1200 <= code < 1300:  # ferry service
-        return 4
-    if 1300 <= code < 1400:  # aerial lift service
-        return 6
-    if 1400 <= code < 1500:  # funicular service
-        return 7
-    return None
+def _clean_id(value):
+    # id columns in real feeds occasionally carry stray whitespace
+    return str(value).strip() if value is not None else ""
 
 
 def _shape_route_types(editor):
@@ -100,12 +67,16 @@ def _shape_route_types(editor):
         return {}
     if {"route_id", "route_type"} - set(routes.columns):
         return {}
-    route_types = dict(zip(routes["route_id"], routes["route_type"]))
+    route_types = {
+        _clean_id(route_id): route_type
+        for route_id, route_type in zip(routes["route_id"], routes["route_type"])
+    }
     mapping = {}
     for route_id, shape_id in zip(trips["route_id"], trips["shape_id"]):
+        shape_id = _clean_id(shape_id)
         if not shape_id or shape_id in mapping:
             continue
-        base = _base_route_type(route_types.get(route_id))
+        base = _base_route_type(route_types.get(_clean_id(route_id)))
         if base is not None:
             mapping[shape_id] = base
     return mapping
@@ -359,14 +330,23 @@ def create_app(
         }
 
     @app.get("/api/tables/{name}")
-    def table(name: str, offset: int = 0, limit: int = 1000):
+    def table(name: str, offset: int = 0, limit: int = 1000, q: str | None = None):
         with lock:
-            return _table(name, offset, limit)
+            return _table(name, offset, limit, q)
 
-    def _table(name, offset, limit):
+    def _table(name, offset, limit, q=None):
         if name not in current_editor().tables:
             raise HTTPException(404, f"no table {name}")
         frame = current_editor().tables[name]
+        needle = (q or "").strip().lower()
+        if needle:
+            # case-insensitive substring match across every column
+            mask = frame.apply(
+                lambda column: column.astype(str)
+                .str.lower()
+                .str.contains(needle, regex=False)
+            ).any(axis=1)
+            frame = frame[mask]
         window = frame.iloc[offset : offset + max(0, min(limit, 10_000))]
         return {
             "name": name,
@@ -424,7 +404,7 @@ def create_app(
                     "feed_id": entry.feed_id,
                     "feed_color": entry.color,
                 }
-                route_type = route_types.get(row["shape_id"])
+                route_type = route_types.get(_clean_id(row["shape_id"]))
                 if route_type is not None:
                     properties["route_type"] = route_type
                 features.append(
@@ -846,6 +826,40 @@ def create_app(
             raise HTTPException(422, "bbox coordinates out of range or reversed")
         return (minx, miny, maxx, maxy)
 
+    @app.get("/api/fs/dirs")
+    def fs_dirs(path: str | None = None):
+        # Directory listing for the download-folder browser. Same local-file
+        # trust model as loading a feed from a path or saving to one: the
+        # loopback single user browses their own machine.
+        try:
+            base = Path(path).expanduser() if path else Path.home()
+            base = base.resolve()
+        except (OSError, RuntimeError, ValueError, KeyError) as error:
+            # unknown ~user, symlink loops, NUL bytes: a clean 404, not a 500
+            raise HTTPException(404, f"cannot resolve: {error}") from None
+        if not base.is_dir():
+            raise HTTPException(404, f"not a directory: {base}")
+        subdirs = []
+        try:
+            entries = list(base.iterdir())
+        except PermissionError:
+            raise HTTPException(403, f"not readable: {base}") from None
+        except OSError as error:  # e.g. the directory vanished meanwhile
+            raise HTTPException(404, f"cannot list: {error}") from None
+        for entry in entries:
+            try:
+                if (
+                    entry.is_dir()
+                    and not entry.name.startswith(".")
+                    # only offer directories the browser could descend into
+                    and os.access(entry, os.R_OK | os.X_OK)
+                ):
+                    subdirs.append(entry.name)
+            except OSError:
+                continue  # unreadable entry: skip it
+        parent = os.fspath(base.parent) if base.parent != base else None
+        return {"path": os.fspath(base), "parent": parent, "dirs": sorted(subdirs)}
+
     @app.get("/api/search")
     def search(
         country: str | None = None,
@@ -889,6 +903,17 @@ def create_app(
         aoi = payload.get("aoi")
         if aoi is not None:
             aoi = _acquire_bbox(aoi)  # validate before touching the network
+        directory = payload.get("directory")
+        if directory is not None:
+            if not isinstance(directory, str) or not directory.strip():
+                raise HTTPException(422, "'directory' must be a non-empty string")
+            try:
+                directory = Path(directory).expanduser()
+                directory.mkdir(parents=True, exist_ok=True)
+            except (OSError, RuntimeError, ValueError, KeyError) as error:
+                raise HTTPException(
+                    422, f"cannot use download directory: {error}"
+                ) from None
         feed = search_cache.get(feed_id)
         if feed is None:
             raise HTTPException(404, f"unknown feed {feed_id}; search for it first")
@@ -898,9 +923,10 @@ def create_app(
         from transitio.edit import FeedEditor
 
         # Download, optionally crop, and load outside the lock; only the
-        # registry insert needs it.
+        # registry insert needs it. A given directory replaces the transitio
+        # cache as the target (the AOI crop lands beside its download).
         try:
-            path = get_catalog().download_latest(feed)
+            path = get_catalog().download_latest(feed, directory=directory)
         except Exception as error:  # noqa: B902
             raise HTTPException(502, f"download failed: {error}") from None
         source = path
@@ -920,6 +946,7 @@ def create_app(
                 loaded,
                 feed.provider or feed.id,
                 source=os.fspath(source),
+                origin=feed.id,
             )
             entry.active = activate
             return entry_dict(entry, registry)

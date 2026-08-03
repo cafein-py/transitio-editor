@@ -9,7 +9,19 @@ export const SNAP_FILTERS = {
 };
 
 export const store = reactive({
-  activeTab: "edit",
+  activeTab: "view",
+  editMode: false, // the View/Edit tab's switch: map features editable
+  tableView: {
+    open: false, // attribute table shown below the map
+    file: "", // GTFS file being browsed
+    q: "", // search text (server-side substring filter)
+    offset: 0,
+    limit: 100,
+    total: 0,
+    columns: [],
+    rows: [],
+    loading: false,
+  },
   source: null,
   tables: {},
   catalogue: [], // [{ feed_id, name, active, color, current, source, tables }]
@@ -34,8 +46,12 @@ export const store = reactive({
   reportStale: false, // edits happened after the last validation
   highlightActive: false,
   feedVisible: true, // GTFS layer group visibility toggle
+  stopsVisible: true, // stop markers shown (within the feed group)
   shapeColorBy: "mode", // shapes colored by transport "mode" | "feed"
-  hiddenModes: [], // route_type codes hidden from the shapes layer
+  // route_type codes hidden from the shapes layer; unknown-mode shapes
+  // (sentinel -1) start hidden so unclassifiable lines don't clutter the map.
+  hiddenModes: [-1],
+  presentModes: [], // mode codes present in the loaded feeds' shapes
   aoi: null, // a drawn [minx, miny, maxx, maxy] area, shared by OSM + GTFS
   aoiDrawing: false, // a rectangle drag is in progress
   network: {
@@ -66,6 +82,8 @@ export const store = reactive({
     officialOnly: false,
     aoiMode: "none", // search-area source: "none" | "map" | "drawn"
     cropToAoi: false, // crop a downloaded feed to the selected area
+    downloadDir: "", // optional folder for downloads (default: the cache)
+    browse: { open: false, path: "", parent: null, dirs: [], error: "" },
     limit: 50,
     results: [],
     searching: false,
@@ -74,6 +92,8 @@ export const store = reactive({
     sortKey: null,
     sortDir: "asc",
     downloadingId: null,
+    selected: [], // ids picked for a bulk download
+    bulk: { running: false, done: 0, total: 0 },
   },
   status: "",
 });

@@ -2,7 +2,7 @@
 import { computed } from "vue";
 
 import { store } from "../store.js";
-import { feedTableSummary } from "../catalogue.js";
+import { feedModes, feedTableSummary } from "../catalogue.js";
 import {
   addFeed,
   removeFeed,
@@ -50,6 +50,16 @@ const osmName = computed(() => {
             <span class="kind-badge gtfs">GTFS</span>
             <span class="feed-name">{{ feed.name }}</span>
             <span class="feed-tables">{{ feedTableSummary(feed.tables) }}</span>
+            <span v-if="feedModes(feed.modes).length" class="feed-modes">
+              <span
+                v-for="mode in feedModes(feed.modes)"
+                :key="mode.code"
+                class="mode-chip"
+              >
+                <span class="swatch" :style="{ background: mode.color }"></span
+                >{{ mode.label }}
+              </span>
+            </span>
           </td>
           <td>
             <input

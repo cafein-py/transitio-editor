@@ -30,3 +30,17 @@ export function sortFeeds(feeds, key, direction) {
   const sign = direction === "desc" ? -1 : 1;
   return feeds.slice().sort((a, b) => sign * value(a).localeCompare(value(b)));
 }
+
+// Whether a search result is already loaded in the catalogue (matched by the
+// Mobility Database id recorded when a feed is downloaded).
+export function isDownloaded(catalogue, feedId) {
+  return catalogue.some((entry) => entry.origin === feedId);
+}
+
+// The results that can join a bulk download: downloadable and not already
+// in the catalogue.
+export function selectableFeeds(results, catalogue) {
+  return results.filter(
+    (feed) => feed.downloadable && !isDownloaded(catalogue, feed.id),
+  );
+}

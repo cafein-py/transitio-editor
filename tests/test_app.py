@@ -685,8 +685,18 @@ class _StubCatalog:
 
     def download_latest(self, feed, directory=None):
         self.downloaded.append(feed.id)
+        self.directories = getattr(self, "directories", [])
+        self.directories.append(directory)
         if self._download_path is None:
             raise RuntimeError("download unavailable")
+        if directory is not None:
+            # mirror the real client: the zip lands in the given directory
+            import shutil
+            from pathlib import Path
+
+            target = Path(directory) / Path(self._download_path).name
+            shutil.copy(self._download_path, target)
+            return target
         return self._download_path
 
 
@@ -794,6 +804,13 @@ def test_download_adds_searched_feed_to_catalogue(editor, tmp_path):
     assert added.status_code == 200
     entry = added.json()
     assert entry["name"] == "HSL" and entry["active"] is True
+    # the origin records the Mobility DB id, so the search list can mark
+    # already-downloaded feeds; locally loaded feeds carry no origin
+    assert entry["origin"] == "mdb-1"
+    assert entry["modes"] == [3]  # the downloaded fixture is a bus feed
+    local = client.get("/api/catalogue").json()["feeds"][0]
+    assert local["origin"] is None
+    assert local["modes"] == [0]  # the editor fixture's route is a tram
     assert stub.downloaded == ["mdb-1"]
 
     feeds = client.get("/api/catalogue").json()["feeds"]
@@ -938,6 +955,41 @@ def test_download_crop_writes_provenance(editor, tmp_path):
     data = json.loads(open(sidecar).read())
     assert data["aoi_bbox"] == _HELSINKI_AOI
     assert data["row_counts"]["stops.txt"] == 2 and data["source_dataset"]
+
+
+def test_download_into_chosen_directory(editor, tmp_path):
+    zip_path = _write_feed(tmp_path / "dl.zip", "d1", 60.4, 25.2)
+    stub = _StubCatalog([_catalog_feed()], token="tok", download_path=zip_path)
+    client = TestClient(create_app(editor, catalog_factory=lambda: stub))
+    client.get("/api/search")
+    target = tmp_path / "work" / "nyc"  # created on demand
+    entry = client.post(
+        "/api/catalogue/download",
+        json={"feed_id": "mdb-1", "directory": str(target)},
+    ).json()
+    assert stub.directories[-1] == target
+    assert entry["source"].startswith(str(target))
+    # a cropped download lands beside its zip in the same directory
+    two_area = _two_area_feed(tmp_path / "two.zip")
+    stub._download_path = two_area
+    cropped = client.post(
+        "/api/catalogue/download",
+        json={"feed_id": "mdb-1", "directory": str(target), "aoi": _HELSINKI_AOI},
+    ).json()
+    assert cropped["source"].startswith(str(target)) and ".aoi-" in cropped["source"]
+    # invalid directory values are rejected up front
+    assert (
+        client.post(
+            "/api/catalogue/download", json={"feed_id": "mdb-1", "directory": 5}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            "/api/catalogue/download", json={"feed_id": "mdb-1", "directory": "  "}
+        ).status_code
+        == 422
+    )
 
 
 def test_download_rejects_bad_aoi(editor):
@@ -1923,3 +1975,76 @@ def test_shapes_carry_route_type(editor, tmp_path):
     extended = TestClient(create_app(b))
     (feature,) = extended.get("/api/shapes").json()["features"]
     assert feature["properties"]["route_type"] == 3
+
+
+def test_fs_dirs_lists_subdirectories(editor, tmp_path):
+    client = TestClient(create_app(editor))
+    (tmp_path / "alpha").mkdir()
+    (tmp_path / "beta").mkdir()
+    (tmp_path / ".hidden").mkdir()
+    (tmp_path / "file.txt").write_text("x")
+    body = client.get("/api/fs/dirs", params={"path": str(tmp_path)}).json()
+    assert body["path"] == str(tmp_path)
+    assert body["dirs"] == ["alpha", "beta"]  # sorted; no dotdirs, no files
+    assert body["parent"] == str(tmp_path.parent)
+    # navigating into a child works; bad paths are 404, not 500
+    child = client.get("/api/fs/dirs", params={"path": str(tmp_path / "alpha")}).json()
+    assert child["parent"] == str(tmp_path)
+    assert (
+        client.get("/api/fs/dirs", params={"path": str(tmp_path / "nope")}).status_code
+        == 404
+    )
+    assert (
+        client.get(
+            "/api/fs/dirs", params={"path": str(tmp_path / "file.txt")}
+        ).status_code
+        == 404
+    )
+    # no path: the browser starts at the home directory
+    from pathlib import Path
+
+    assert client.get("/api/fs/dirs").json()["path"] == str(Path.home())
+
+
+def test_table_search_filters_rows(editor):
+    client = TestClient(create_app(editor))
+    # substring across any column, case-insensitive
+    body = client.get("/api/tables/stops.txt", params={"q": "kamppi"}).json()
+    assert body["total"] == 1
+    assert body["rows"][0]["stop_id"] == "s1"
+    assert body["columns"]  # column list survives filtering
+    # no match -> empty window, zero total
+    empty = client.get("/api/tables/stops.txt", params={"q": "zzz"}).json()
+    assert empty["total"] == 0 and empty["rows"] == []
+    # blank q is a no-op
+    full = client.get("/api/tables/stops.txt", params={"q": "  "}).json()
+    assert full["total"] == 2
+
+
+def test_reserved_route_types_normalise_to_unknown():
+    from transitio_editor._registry import base_route_type
+
+    # defined base codes pass through; reserved 8-10 and junk yield None
+    assert [base_route_type(code) for code in (0, 7, 11, 12)] == [0, 7, 11, 12]
+    assert base_route_type(8) is None
+    assert base_route_type(9) is None
+    assert base_route_type(10) is None
+    assert base_route_type("x") is None
+
+
+def test_bad_paths_are_client_errors(editor):
+    # a NUL byte is invalid on every platform (an unknown ~user is not: on
+    # Windows expanduser resolves it without raising), so it probes the
+    # malformed-path handling portably: a 4xx, never an unhandled 500.
+    nul_path = "bad" + chr(0) + "dir"
+    client = TestClient(create_app(editor))
+    assert client.get("/api/fs/dirs", params={"path": nul_path}).status_code == 404
+    stub = _StubCatalog([_catalog_feed()], token="tok")
+    with_dir = TestClient(create_app(editor, catalog_factory=lambda: stub))
+    assert (
+        with_dir.post(
+            "/api/catalogue/download",
+            json={"feed_id": "mdb-1", "directory": nul_path},
+        ).status_code
+        == 422
+    )

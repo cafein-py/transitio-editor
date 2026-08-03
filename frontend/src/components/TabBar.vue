@@ -1,37 +1,38 @@
 <script setup>
 import { store } from "../store.js";
+
+// Ordered to follow the workflow: find data (Search), manage what is
+// loaded (Data), explore or edit it (View/Edit, gated by the editing
+// switch), edit the OSM network (OSM), validate the result (Report).
+const TABS = [
+  { key: "search", label: "Search" },
+  { key: "catalogue", label: "Data" },
+  { key: "view", label: "View/Edit" },
+  { key: "network", label: "OSM" },
+  { key: "report", label: "Report" },
+];
 </script>
 
 <template>
   <div class="tab-bar">
-    <button :class="{ active: store.activeTab === 'edit' }" @click="store.activeTab = 'edit'">
-      Edit
-    </button>
     <button
-      :class="{ active: store.activeTab === 'network' }"
-      @click="store.activeTab = 'network'"
+      v-for="tab in TABS"
+      :key="tab.key"
+      :class="{ active: store.activeTab === tab.key }"
+      @click="store.activeTab = tab.key"
     >
-      Network
-    </button>
-    <button
-      :class="{ active: store.activeTab === 'catalogue' }"
-      @click="store.activeTab = 'catalogue'"
-    >
-      Catalogue
-      <span v-if="store.catalogue.length > 1" class="badge">{{ store.catalogue.length }}</span>
-    </button>
-    <button
-      :class="{ active: store.activeTab === 'search' }"
-      @click="store.activeTab = 'search'"
-    >
-      Search
-    </button>
-    <button
-      :class="{ active: store.activeTab === 'report' }"
-      @click="store.activeTab = 'report'"
-    >
-      Report
-      <span v-if="store.reportStale" class="dot" title="edited since last validation"></span>
+      {{ tab.label }}
+      <span
+        v-if="tab.key === 'catalogue' && store.catalogue.length > 1"
+        class="badge"
+      >
+        {{ store.catalogue.length }}
+      </span>
+      <span
+        v-if="tab.key === 'report' && store.reportStale"
+        class="dot"
+        title="edited since last validation"
+      ></span>
     </button>
   </div>
 </template>

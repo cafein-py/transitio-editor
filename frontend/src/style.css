@@ -56,6 +56,9 @@ table.times input { width: 76px; padding: 3px; }
 .catalogue-table tr.current { background: #eef1f6; }
 .catalogue-table .feed-name { font-weight: 600; }
 .catalogue-table .feed-tables { display: block; color: #666; font-size: 11px; }
+.catalogue-table .feed-modes { display: flex; flex-wrap: wrap; gap: 2px 8px; font-size: 11px; color: #555; }
+.catalogue-table .mode-chip { white-space: nowrap; }
+.catalogue-table .mode-chip .swatch { width: 8px; height: 8px; margin-right: 3px; }
 .catalogue-table .remove { padding: 1px 7px; line-height: 1; color: #a33; }
 /* GTFS vs OSM entries: badge colors match their map layers (orange stops,
    purple network). */
@@ -76,6 +79,15 @@ table.times input { width: 76px; padding: 3px; }
 .search-table .official { color: #2c7a3d; margin-left: 4px; }
 .search-table a { margin-left: 6px; font-size: 11px; }
 .search-table .download { padding: 2px 8px; font-size: 11px; }
+.search-table .in-catalogue { color: #2c7a3d; font-weight: 700; }
+.bulk-download { margin-top: 8px; }
+.dir-row { display: flex; gap: 4px; }
+.dir-row input { flex: 1; }
+.dir-browser { border: 1px solid #e2e0da; border-radius: 5px; padding: 6px; font-size: 12px; }
+.dir-browser .dir-path { font-weight: 600; word-break: break-all; margin-bottom: 4px; }
+.dir-browser .dir-list { list-style: none; margin: 0 0 6px; padding: 0; max-height: 160px; overflow-y: auto; }
+.dir-browser .dir-list button { display: block; width: 100%; text-align: left; border: 0; padding: 2px 4px; background: none; }
+.dir-browser .dir-list button:hover { background: #f0eee9; }
 .search code { background: #eee; padding: 0 3px; border-radius: 3px; }
 .search-area { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 4px 0; }
 .search-area select { font-size: 12px; }
@@ -104,7 +116,36 @@ table.times input { width: 76px; padding: 3px; }
 .net-resolved { margin-top: 6px; }
 .net-edit { border: 0; margin: 0; padding: 0; min-inline-size: auto; }
 .net-edit[disabled] { opacity: 0.6; }
+.route-legend .legend-stops { margin: 6px 0 2px; }
 .route-legend .legend-colorby { display: flex; gap: 10px; align-items: center; font-size: 12px; color: #555; margin: 6px 0; }
 .route-legend .legend-colorby label { display: flex; gap: 3px; align-items: center; }
 .route-legend .legend-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; font-size: 12px; }
 .route-legend .legend-mode { display: flex; gap: 4px; align-items: center; }
+.route-legend .legend-all { display: flex; gap: 6px; margin-top: 6px; }
+.route-legend .legend-all button { padding: 2px 8px; font-size: 11px; }
+/* View/Edit layout: the map column holds the map, its floating tools and
+   the attribute table below. */
+#main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+#map-wrap { position: relative; flex: 1; min-height: 0; }
+#map { position: absolute; inset: 0; }
+.edit-switch { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.map-toolbar { position: absolute; top: 10px; left: 10px; z-index: 5; display: flex; gap: 6px; align-items: center; background: rgba(255, 255, 255, 0.95); border: 1px solid #c9c5bb; border-radius: 6px; padding: 5px 7px; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15); }
+.map-toolbar .snap { display: flex; gap: 4px; align-items: center; font-size: 12px; }
+.table-toggle { position: absolute; bottom: 22px; right: 10px; z-index: 5; background: rgba(255, 255, 255, 0.95); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15); }
+.table-panel { height: 40%; min-height: 160px; display: flex; flex-direction: column; border-top: 1px solid #ccc; background: #fff; }
+.table-bar { display: flex; gap: 6px; align-items: center; padding: 6px; border-bottom: 1px solid #eee; }
+.table-bar input { flex: 1; min-width: 80px; }
+.table-bar .table-count { font-size: 12px; color: #666; white-space: nowrap; }
+.table-bar .table-close { color: #a33; }
+.table-scroll { flex: 1; overflow: auto; }
+.attr-table { border-collapse: collapse; font-size: 12px; width: 100%; }
+.attr-table th { position: sticky; top: 0; background: #f7f6f3; text-align: left; padding: 3px 8px; border-bottom: 1px solid #ddd; white-space: nowrap; }
+.attr-table td { padding: 2px 8px; border-bottom: 1px solid #f0eee9; white-space: nowrap; }
+/* Feature attribute cards (hover / pinned popups). */
+.attr-popup .maplibregl-popup-content { padding: 8px 10px; font: 12px/1.4 system-ui, sans-serif; }
+.attr-popup .attr-title { font-weight: 700; margin-bottom: 4px; }
+.attr-popup table { border-collapse: collapse; }
+.attr-popup th { text-align: left; color: #666; font-weight: 500; padding: 1px 8px 1px 0; vertical-align: top; }
+.attr-popup td { padding: 1px 0; }
+.inspector-head { display: flex; justify-content: space-between; align-items: center; }
+.inspector-close { padding: 0 6px; line-height: 1.2; color: #a33; border: 0; background: none; font-size: 14px; }
