@@ -8,6 +8,7 @@ import { api } from "./api.js";
 import { SNAP_FILTERS, store } from "./store.js";
 import { editTarget } from "./network.js";
 import {
+  MODES,
   feedColorExpression,
   modeColorExpression,
   modeFilterExpression,
@@ -507,13 +508,101 @@ export function createMap() {
       event.preventDefault();
     });
 
+    // Attribute cards: hovering a feature while viewing shows its key
+    // attributes; clicking a shape pins the card. Values enter the DOM via
+    // textContent only.
+    const hoverPopup = new maplibregl.Popup({
+      closeButton: false,
+      closeOnClick: false,
+      className: "attr-popup",
+      maxWidth: "320px",
+    });
+    const pinnedPopup = new maplibregl.Popup({
+      closeButton: true,
+      className: "attr-popup",
+      maxWidth: "320px",
+    });
+
+    function attributeCard(title, properties) {
+      const wrap = document.createElement("div");
+      const head = document.createElement("div");
+      head.className = "attr-title";
+      head.textContent = title;
+      wrap.appendChild(head);
+      const table = document.createElement("table");
+      const skip = new Set(["feed_color"]);
+      let rows = 0;
+      for (const [key, value] of Object.entries(properties)) {
+        if (skip.has(key) || value === null || value === undefined || value === "")
+          continue;
+        if (rows >= 8) break;
+        const tr = document.createElement("tr");
+        const th = document.createElement("th");
+        th.textContent = key;
+        const td = document.createElement("td");
+        td.textContent = String(value);
+        tr.append(th, td);
+        table.appendChild(tr);
+        rows += 1;
+      }
+      wrap.appendChild(table);
+      return wrap;
+    }
+
+    function featureCard(feature, kind) {
+      const properties = { ...feature.properties };
+      let title;
+      if (kind === "stop") {
+        title = `stop ${properties.stop_id ?? ""}`;
+      } else {
+        title = `shape ${properties.shape_id ?? ""}`;
+        const mode = MODES.find((entry) => entry.code === properties.route_type);
+        if (mode) {
+          properties.mode = mode.label;
+          delete properties.route_type;
+        }
+      }
+      return attributeCard(title, properties);
+    }
+
+    for (const [layer, kind] of [
+      ["stops", "stop"],
+      ["shapes", "shape"],
+    ]) {
+      map.on("mousemove", layer, (event) => {
+        if (store.activeTab !== "view" || store.editMode) return;
+        hoverPopup
+          .setLngLat(event.lngLat)
+          .setDOMContent(featureCard(event.features[0], kind))
+          .addTo(map);
+        map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mouseleave", layer, () => {
+        hoverPopup.remove();
+        if (store.activeTab === "view" && !store.editMode) setCursor("");
+      });
+    }
+
+    // Shapes are selectable with editing on or off: a click pins their card.
+    map.on("click", "shapes", (event) => {
+      if (event.defaultPrevented || store.aoiDrawing) return;
+      if (store.activeTab !== "view") return;
+      if (store.mode !== "select" || store.movingStop) return;
+      hoverPopup.remove();
+      pinnedPopup
+        .setLngLat(event.lngLat)
+        .setDOMContent(featureCard(event.features[0], "shape"))
+        .addTo(map);
+      event.preventDefault();
+    });
+
     map.on("click", (event) => {
       if (event.defaultPrevented || store.aoiDrawing) return;
       if (editTarget(store.activeTab) === "network") {
         handleNetworkClick(event);
-      } else if (store.activeTab === "edit") {
-        // Feed mutations only on the Edit tab: a mode left armed there (add
-        // stop, draw) must not fire from the read-only View tab.
+      } else if (store.activeTab === "view" && store.editMode) {
+        // Feed mutations only with the editing switch on: an armed mode
+        // (add stop, draw) must not fire while just viewing.
         handleMapClick(event);
       }
     });

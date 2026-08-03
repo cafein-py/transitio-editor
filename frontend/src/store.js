@@ -10,6 +10,18 @@ export const SNAP_FILTERS = {
 
 export const store = reactive({
   activeTab: "view",
+  editMode: false, // the View/Edit tab's switch: map features editable
+  tableView: {
+    open: false, // attribute table shown below the map
+    file: "", // GTFS file being browsed
+    q: "", // search text (server-side substring filter)
+    offset: 0,
+    limit: 100,
+    total: 0,
+    columns: [],
+    rows: [],
+    loading: false,
+  },
   source: null,
   tables: {},
   catalogue: [], // [{ feed_id, name, active, color, current, source, tables }]

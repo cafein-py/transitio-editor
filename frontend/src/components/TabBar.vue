@@ -7,8 +7,7 @@ import { store } from "../store.js";
 const TABS = [
   { key: "search", label: "Search" },
   { key: "catalogue", label: "Data" },
-  { key: "view", label: "View" },
-  { key: "edit", label: "Edit" },
+  { key: "view", label: "View/Edit" },
   { key: "network", label: "OSM" },
   { key: "report", label: "Report" },
 ];

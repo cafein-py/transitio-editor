@@ -2004,3 +2004,18 @@ def test_fs_dirs_lists_subdirectories(editor, tmp_path):
     from pathlib import Path
 
     assert client.get("/api/fs/dirs").json()["path"] == str(Path.home())
+
+
+def test_table_search_filters_rows(editor):
+    client = TestClient(create_app(editor))
+    # substring across any column, case-insensitive
+    body = client.get("/api/tables/stops.txt", params={"q": "kamppi"}).json()
+    assert body["total"] == 1
+    assert body["rows"][0]["stop_id"] == "s1"
+    assert body["columns"]  # column list survives filtering
+    # no match -> empty window, zero total
+    empty = client.get("/api/tables/stops.txt", params={"q": "zzz"}).json()
+    assert empty["total"] == 0 and empty["rows"] == []
+    # blank q is a no-op
+    full = client.get("/api/tables/stops.txt", params={"q": "  "}).json()
+    assert full["total"] == 2

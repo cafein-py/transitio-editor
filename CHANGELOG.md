@@ -55,14 +55,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with extended (Google-extension) route types normalised to their base
   families.
 
+### Added
+
+- An attribute table below the map: a floating "Table" button opens a
+  panel listing any GTFS file's rows (stops, routes, trips, …) for the
+  current feed, with a file selector, a search box filtering across every
+  column (server-side, `q` on `GET /api/tables/{name}`) and paging.
+- Hovering a stop or route shape while viewing opens an attribute card
+  with its key fields; clicking a shape pins the card. Features are
+  selectable whether editing is on or off.
+
 ### Changed
 
-- The sidebar tabs follow the workflow left to right — Search, Data
-  (the catalogue), the new View tab, Edit, OSM (the network tab), Report —
-  and the editor opens on View. The new View tab explores the loaded data
-  without editing it: the feed summary and the "Map display" legend live
-  there, and feed-mutating map clicks fire only from the Edit tab, so an
-  armed add-stop or draw mode cannot edit from View.
+- The View and Edit tabs merge into one View/Edit tab with an "editing
+  mode" switch: viewing is the default, and flipping the switch reveals
+  the editing forms in the sidebar plus floating map buttons (Select,
+  + Stop, + Shape with snapping) over the map. Feed-mutating map clicks
+  fire only while the switch is on, and the stop inspector is read-only
+  without it. The sidebar tabs follow the workflow left to right —
+  Search, Data (the catalogue), View/Edit, OSM (the network tab),
+  Report — and the editor opens on View/Edit.
 - Downloading a feed no longer switches the view to the Catalogue tab, so
   several of an area's feeds can be downloaded in a row without the GUI
   bouncing away from the search results.

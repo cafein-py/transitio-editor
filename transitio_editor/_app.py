@@ -330,14 +330,23 @@ def create_app(
         }
 
     @app.get("/api/tables/{name}")
-    def table(name: str, offset: int = 0, limit: int = 1000):
+    def table(name: str, offset: int = 0, limit: int = 1000, q: str | None = None):
         with lock:
-            return _table(name, offset, limit)
+            return _table(name, offset, limit, q)
 
-    def _table(name, offset, limit):
+    def _table(name, offset, limit, q=None):
         if name not in current_editor().tables:
             raise HTTPException(404, f"no table {name}")
         frame = current_editor().tables[name]
+        needle = (q or "").strip().lower()
+        if needle:
+            # case-insensitive substring match across every column
+            mask = frame.apply(
+                lambda column: column.astype(str)
+                .str.lower()
+                .str.contains(needle, regex=False)
+            ).any(axis=1)
+            frame = frame[mask]
         window = frame.iloc[offset : offset + max(0, min(limit, 10_000))]
         return {
             "name": name,

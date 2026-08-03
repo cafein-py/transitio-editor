@@ -123,3 +123,27 @@ table.times input { width: 76px; padding: 3px; }
 .route-legend .legend-mode { display: flex; gap: 4px; align-items: center; }
 .route-legend .legend-all { display: flex; gap: 6px; margin-top: 6px; }
 .route-legend .legend-all button { padding: 2px 8px; font-size: 11px; }
+/* View/Edit layout: the map column holds the map, its floating tools and
+   the attribute table below. */
+#main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+#map-wrap { position: relative; flex: 1; min-height: 0; }
+#map { position: absolute; inset: 0; }
+.edit-switch { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.map-toolbar { position: absolute; top: 10px; left: 10px; z-index: 5; display: flex; gap: 6px; align-items: center; background: rgba(255, 255, 255, 0.95); border: 1px solid #c9c5bb; border-radius: 6px; padding: 5px 7px; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15); }
+.map-toolbar .snap { display: flex; gap: 4px; align-items: center; font-size: 12px; }
+.table-toggle { position: absolute; bottom: 22px; right: 10px; z-index: 5; background: rgba(255, 255, 255, 0.95); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15); }
+.table-panel { height: 40%; min-height: 160px; display: flex; flex-direction: column; border-top: 1px solid #ccc; background: #fff; }
+.table-bar { display: flex; gap: 6px; align-items: center; padding: 6px; border-bottom: 1px solid #eee; }
+.table-bar input { flex: 1; min-width: 80px; }
+.table-bar .table-count { font-size: 12px; color: #666; white-space: nowrap; }
+.table-bar .table-close { color: #a33; }
+.table-scroll { flex: 1; overflow: auto; }
+.attr-table { border-collapse: collapse; font-size: 12px; width: 100%; }
+.attr-table th { position: sticky; top: 0; background: #f7f6f3; text-align: left; padding: 3px 8px; border-bottom: 1px solid #ddd; white-space: nowrap; }
+.attr-table td { padding: 2px 8px; border-bottom: 1px solid #f0eee9; white-space: nowrap; }
+/* Feature attribute cards (hover / pinned popups). */
+.attr-popup .maplibregl-popup-content { padding: 8px 10px; font: 12px/1.4 system-ui, sans-serif; }
+.attr-popup .attr-title { font-weight: 700; margin-bottom: 4px; }
+.attr-popup table { border-collapse: collapse; }
+.attr-popup th { text-align: left; color: #666; font-weight: 500; padding: 1px 8px 1px 0; vertical-align: top; }
+.attr-popup td { padding: 1px 0; }

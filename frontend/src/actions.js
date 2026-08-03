@@ -306,6 +306,48 @@ export function wrap(action) {
   };
 }
 
+export function toggleEditMode() {
+  store.editMode = !store.editMode;
+  // Leaving edit mode disarms any pending map mutation (add stop, draw,
+  // move) so the read-only view really is read-only.
+  if (!store.editMode) setMode("select");
+}
+
+export async function loadTable(patch = {}) {
+  const view = store.tableView;
+  Object.assign(view, patch);
+  if (!view.file) {
+    const files = Object.keys(store.tables);
+    if (!files.length) return;
+    view.file = files[0];
+  }
+  view.loading = true;
+  try {
+    const params = new URLSearchParams({
+      offset: String(view.offset),
+      limit: String(view.limit),
+    });
+    if (view.q.trim()) params.set("q", view.q.trim());
+    const body = await api(
+      "GET",
+      `/api/tables/${encodeURIComponent(view.file)}?${params.toString()}`,
+    );
+    view.total = body.total;
+    view.columns = body.columns;
+    view.rows = body.rows;
+  } catch (error) {
+    store.status = error.message;
+  } finally {
+    view.loading = false;
+  }
+}
+
+export function toggleTableView() {
+  const view = store.tableView;
+  view.open = !view.open;
+  if (view.open) loadTable({ offset: 0 });
+}
+
 export function setMode(mode) {
   store.mode = mode;
   // A pending "move stop" would otherwise hijack the next map click in
