@@ -1988,9 +1988,7 @@ def test_fs_dirs_lists_subdirectories(editor, tmp_path):
     assert body["dirs"] == ["alpha", "beta"]  # sorted; no dotdirs, no files
     assert body["parent"] == str(tmp_path.parent)
     # navigating into a child works; bad paths are 404, not 500
-    child = client.get(
-        "/api/fs/dirs", params={"path": str(tmp_path / "alpha")}
-    ).json()
+    child = client.get("/api/fs/dirs", params={"path": str(tmp_path / "alpha")}).json()
     assert child["parent"] == str(tmp_path)
     assert (
         client.get("/api/fs/dirs", params={"path": str(tmp_path / "nope")}).status_code
