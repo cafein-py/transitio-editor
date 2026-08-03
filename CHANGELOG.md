@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+- Route shapes are colored by transport mode (tram, metro, rail, bus,
+  ferry, cable tram, aerial lift, funicular, trolleybus, monorail), with a
+  collapsible "Route colors" legend on the Edit tab whose checkboxes hide
+  or show each mode and a color-by mode/feed switch that restores the
+  per-feed coloring for overlaid feeds. `/api/shapes` features now carry a
+  `route_type` resolved through each shape's trips, with extended
+  (Google-extension) route types normalised to their base families.
+
 ## 0.6.1 — 2026-08-03
 
 ### Changed

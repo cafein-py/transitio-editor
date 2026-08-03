@@ -7,6 +7,11 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { api } from "./api.js";
 import { SNAP_FILTERS, store } from "./store.js";
 import { editTarget } from "./network.js";
+import {
+  feedColorExpression,
+  modeColorExpression,
+  modeFilterExpression,
+} from "./modes.js";
 
 let map = null;
 // Resolves once the map's sources and layers exist, so network data applied
@@ -342,7 +347,8 @@ export function createMap() {
       type: "line",
       source: "shapes",
       paint: {
-        "line-color": ["coalesce", ["get", "feed_color"], "#35507a"],
+        // colored by transport mode by default; switchable to feed colors
+        "line-color": modeColorExpression(),
         "line-width": 3,
         "line-opacity": 0.8,
       },
@@ -539,6 +545,11 @@ export function createMap() {
       }
     });
 
+    // Re-apply legend state chosen before the async load finished, so an
+    // early color-by switch or mode toggle isn't lost.
+    setShapeColorBy(store.shapeColorBy);
+    setHiddenModes([...store.hiddenModes]);
+
     try {
       await refreshAll(true);
     } catch (error) {
@@ -641,4 +652,18 @@ export function setNetworkVisible(visible) {
 
 export function setFeedVisible(visible) {
   setGroupVisible(["stops", "shapes", "stops-highlight", "shapes-highlight"], visible);
+}
+
+export function setShapeColorBy(colorBy) {
+  if (!map || !map.getLayer("shapes")) return;
+  map.setPaintProperty(
+    "shapes",
+    "line-color",
+    colorBy === "feed" ? feedColorExpression() : modeColorExpression(),
+  );
+}
+
+export function setHiddenModes(hiddenCodes) {
+  if (!map || !map.getLayer("shapes")) return;
+  map.setFilter("shapes", modeFilterExpression(hiddenCodes));
 }

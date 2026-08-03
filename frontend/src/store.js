@@ -34,6 +34,8 @@ export const store = reactive({
   reportStale: false, // edits happened after the last validation
   highlightActive: false,
   feedVisible: true, // GTFS layer group visibility toggle
+  shapeColorBy: "mode", // shapes colored by transport "mode" | "feed"
+  hiddenModes: [], // route_type codes hidden from the shapes layer
   aoi: null, // a drawn [minx, miny, maxx, maxy] area, shared by OSM + GTFS
   aoiDrawing: false, // a rectangle drag is in progress
   network: {

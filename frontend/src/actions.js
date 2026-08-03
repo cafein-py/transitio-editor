@@ -267,6 +267,19 @@ export function toggleFeedVisible() {
   mapBridge.setFeedVisible(store.feedVisible);
 }
 
+export function setShapeColorBy(colorBy) {
+  store.shapeColorBy = colorBy;
+  mapBridge.setShapeColorBy(colorBy);
+}
+
+export function toggleModeHidden(code) {
+  const hidden = store.hiddenModes;
+  const index = hidden.indexOf(code);
+  if (index === -1) hidden.push(code);
+  else hidden.splice(index, 1);
+  mapBridge.setHiddenModes([...hidden]);
+}
+
 export function wrap(action) {
   return async (...args) => {
     try {

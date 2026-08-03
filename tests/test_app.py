@@ -1883,3 +1883,32 @@ def test_osm_download_load_failure_retains_previous(editor, monkeypatch):
     assert got.status_code == 422  # candidate cannot load
     after = len(client.get("/api/network/features").json()["ways"]["features"])
     assert after == before  # previous network intact
+
+
+def test_shapes_carry_route_type(editor, tmp_path):
+    # the fixture's shape belongs to a route_type 0 (tram) route
+    client = TestClient(create_app(editor))
+    (feature,) = client.get("/api/shapes").json()["features"]
+    assert feature["properties"]["route_type"] == 0
+
+    # extended route types normalise to their base family (700 -> bus 3)
+    b = FeedBuilder()
+    b.add_agency("a", "A", "https://a.example", "Europe/Helsinki")
+    b.add_stop("s1", "S1", 60.1, 24.9)
+    b.add_stop("s2", "S2", 60.2, 24.95)
+    b.add_route("r", 700, "1", agency_id="a")
+    b.add_service("wk", "weekdays", "20260101", "20261231")
+    b.add_shape("sh", [(60.1, 24.9), (60.2, 24.95)])
+    b.add_frequency_trip(
+        "r",
+        "wk",
+        "t",
+        [("s1", 0), ("s2", 300)],
+        start="06:00:00",
+        end="09:00:00",
+        headway=600,
+        shape_id="sh",
+    )
+    extended = TestClient(create_app(b))
+    (feature,) = extended.get("/api/shapes").json()["features"]
+    assert feature["properties"]["route_type"] == 3
