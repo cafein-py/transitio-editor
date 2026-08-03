@@ -975,7 +975,16 @@ def test_network_available_flag(editor):
     with_pbf = TestClient(create_app(editor, osm_pbf="fake.osm.pbf")).get(
         "/api/network"
     )
-    assert with_pbf.json() == {"available": True}
+    # the source shows before the (lazy) load; counts appear only when loaded
+    assert with_pbf.json() == {"available": True, "source": "fake.osm.pbf"}
+
+
+def test_network_summary_counts_when_loaded(editor):
+    client = TestClient(create_app(editor, osm_pbf=_osm_pbf(), network_type="driving"))
+    client.get("/api/network/features")  # load the network
+    body = client.get("/api/network").json()
+    assert body["available"] is True and body["source"].endswith(".pbf")
+    assert body["ways"] > 0 and body["nodes"] > 0
 
 
 def test_network_nodes_and_ways_geojson(editor):
@@ -1751,7 +1760,9 @@ def test_osm_download_sets_network_from_nothing(editor, monkeypatch):
     r = _resolved(client)
     got = client.post("/api/osm/download", json={"bbox": r["bbox"], "url": r["url"]})
     assert got.status_code == 200 and got.json()["ways"] > 0
-    assert client.get("/api/network").json() == {"available": True}
+    summary = client.get("/api/network").json()
+    assert summary["available"] is True and summary["source"] == got.json()["path"]
+    assert summary["ways"] > 0  # loaded by the download, so counts are known
     assert len(client.get("/api/network/features").json()["ways"]["features"]) > 0
 
 

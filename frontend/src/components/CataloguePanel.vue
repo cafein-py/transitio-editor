@@ -1,4 +1,6 @@
 <script setup>
+import { computed } from "vue";
+
 import { store } from "../store.js";
 import { feedTableSummary } from "../catalogue.js";
 import {
@@ -6,7 +8,13 @@ import {
   removeFeed,
   setCurrentFeed,
   toggleFeedActive,
+  toggleNetworkVisible,
 } from "../actions.js";
+
+const osmName = computed(() => {
+  const source = store.network.source;
+  return source ? source.split("/").pop() : "OSM network";
+});
 </script>
 
 <template>
@@ -39,6 +47,7 @@ import {
           </td>
           <td>
             <span class="swatch" :style="{ background: feed.color }"></span>
+            <span class="kind-badge gtfs">GTFS</span>
             <span class="feed-name">{{ feed.name }}</span>
             <span class="feed-tables">{{ feedTableSummary(feed.tables) }}</span>
           </td>
@@ -63,6 +72,22 @@ import {
       </tbody>
     </table>
     <p v-else class="hint">no feeds loaded.</p>
+
+    <!-- The one OSM extract loads via the Network tab or --osm-pbf; it lists
+         here so all loaded data is visible in one place. -->
+    <div v-if="store.network.available" class="osm-row">
+      <input
+        type="checkbox"
+        title="shown on map"
+        :checked="store.network.visible"
+        @change="toggleNetworkVisible"
+      />
+      <span class="kind-badge osm">OSM</span>
+      <span class="feed-name" :title="store.network.source">{{ osmName }}</span>
+      <span v-if="store.network.loaded" class="feed-tables">
+        {{ store.network.wayCount }} ways, {{ store.network.nodeCount }} nodes
+      </span>
+    </div>
 
     <form class="add-feed" @submit.prevent="addFeed">
       <input

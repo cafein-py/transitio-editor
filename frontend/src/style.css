@@ -57,6 +57,13 @@ table.times input { width: 76px; padding: 3px; }
 .catalogue-table .feed-name { font-weight: 600; }
 .catalogue-table .feed-tables { display: block; color: #666; font-size: 11px; }
 .catalogue-table .remove { padding: 1px 7px; line-height: 1; color: #a33; }
+/* GTFS vs OSM entries: badge colors match their map layers (orange stops,
+   purple network). */
+.kind-badge { display: inline-block; padding: 0 4px; border-radius: 3px; font-size: 10px; font-weight: 700; color: #fff; margin-right: 5px; vertical-align: middle; }
+.kind-badge.gtfs { background: #e67e22; }
+.kind-badge.osm { background: #7a4fbf; }
+.osm-row { display: flex; align-items: center; gap: 5px; margin-top: 8px; padding: 3px 4px; font-size: 12px; border-top: 1px solid #eee; }
+.osm-row .feed-tables { color: #666; font-size: 11px; }
 .add-feed { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #555; }
 .check input { width: auto; }

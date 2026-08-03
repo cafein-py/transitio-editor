@@ -911,7 +911,17 @@ def create_app(
 
     @app.get("/api/network")
     def network_summary():
-        return {"available": osm_state["source"] is not None}
+        # Source and counts let the catalogue list the OSM extract alongside
+        # the GTFS feeds; counts exist only once the network is loaded.
+        with lock:
+            body = {"available": osm_state["source"] is not None}
+            if osm_state["source"] is not None:
+                body["source"] = os.fspath(osm_state["source"])
+                editor = osm_state["editor"]
+                if editor is not None:
+                    body["nodes"] = int(len(editor.nodes))
+                    body["ways"] = int(len(editor.ways))
+        return body
 
     def _network_int_id(raw):
         # Provisional elements carry negative ids. Parse exactly (no float,
