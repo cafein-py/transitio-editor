@@ -20,7 +20,8 @@ const legendModes = computed(() =>
 </script>
 
 <template>
-  <details class="panel route-legend">
+  <!-- Open by default: the mode legend is the first thing to see and use. -->
+  <details class="panel route-legend" open>
     <summary>Map display</summary>
     <label class="check legend-stops">
       <input
