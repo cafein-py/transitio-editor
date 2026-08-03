@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { currentFeed, feedModes, feedTableSummary } from "../src/catalogue.js";
+import {
+  currentFeed,
+  feedModes,
+  feedTableSummary,
+  mergeStatus,
+} from "../src/catalogue.js";
 
 describe("feedTableSummary", () => {
   it("pluralizes counts and defaults missing tables to zero", () => {
@@ -30,6 +35,18 @@ describe("currentFeed", () => {
     expect(currentFeed(catalogue, "feed-9")).toBeNull();
     expect(currentFeed(catalogue, null)).toBeNull();
     expect(currentFeed([], "feed-1")).toBeNull();
+  });
+});
+
+describe("mergeStatus", () => {
+  it("names the merged feed and any files the merge dropped", () => {
+    expect(mergeStatus("HSL + Metro", [])).toBe('merged into "HSL + Metro"');
+    expect(mergeStatus("HSL + Metro", undefined)).toBe('merged into "HSL + Metro"');
+    expect(
+      mergeStatus("Combined", ["feed_info.txt", "translations.txt"]),
+    ).toBe(
+      'merged into "Combined" — feed_info.txt, translations.txt not carried over',
+    );
   });
 });
 

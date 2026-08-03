@@ -53,6 +53,43 @@ def _clean_id(value):
     return str(value).strip() if value is not None else ""
 
 
+def _merge_prefixes(names, feed_ids):
+    """Id prefixes for a merge, derived from the feeds' display names.
+
+    transitio requires unique, non-empty, colon-free prefixes; names are
+    stripped of colons and deduplicated, falling back to the feed id.
+    """
+    prefixes = []
+    used = set()
+    for name, feed_id in zip(names, feed_ids):
+        prefix = str(name).replace(":", "").strip() or feed_id
+        candidate = prefix
+        suffix = 2
+        while candidate in used:
+            candidate = f"{prefix}-{suffix}"
+            suffix += 1
+        used.add(candidate)
+        prefixes.append(candidate)
+    return prefixes
+
+
+def _editor_from_tables(tables):
+    """A FeedEditor over already-merged tables, with no source file.
+
+    transitio has no public constructor from tables, and writing the
+    merged feed out just to read it back would cost a validation pass
+    the user has not asked for yet; the entry is validated on save like
+    any other feed.
+    """
+    from transitio.edit import FeedBuilder, FeedEditor
+
+    editor = FeedEditor.__new__(FeedEditor)
+    FeedBuilder.__init__(editor)
+    editor.source = None
+    editor.tables = tables
+    return editor
+
+
 def _shape_route_types(editor):
     """Map each shape_id to its route's base route_type via the trips table.
 
@@ -760,6 +797,47 @@ def create_app(
                 source=os.fspath(path),
             )
             return entry_dict(entry, registry)
+
+    @app.post("/api/catalogue/merge")
+    def catalogue_merge(payload: dict = Body(...)):
+        from transitio.gtfs import merge_tables
+
+        feed_ids = payload.get("feed_ids")
+        if not isinstance(feed_ids, list) or not all(
+            isinstance(feed_id, str) for feed_id in feed_ids
+        ):
+            raise HTTPException(422, "'feed_ids' must be a list of strings")
+        if len(feed_ids) < 2:
+            raise HTTPException(422, "merging needs at least two feeds")
+        if len(set(feed_ids)) != len(feed_ids):
+            raise HTTPException(422, "a feed cannot be merged with itself")
+        with lock:
+            entries = []
+            for feed_id in feed_ids:
+                entry = registry.get(feed_id)
+                if entry is None:
+                    raise HTTPException(422, f"no feed {feed_id}")
+                entries.append(entry)
+            prefixes = _merge_prefixes(
+                [entry.name for entry in entries], [entry.feed_id for entry in entries]
+            )
+            try:
+                tables, dropped = merge_tables(
+                    [entry.editor.tables for entry in entries],
+                    prefixes=prefixes,
+                    extra_entries=[
+                        list(getattr(entry.editor, "_extra_entries", {}))
+                        for entry in entries
+                    ],
+                )
+            except (TypeError, ValueError) as error:
+                raise HTTPException(422, str(error)) from None
+            name = str(payload.get("name") or "").strip()
+            if not name:
+                name = " + ".join(entry.name for entry in entries)[:60]
+            merged = registry.add(_editor_from_tables(tables), name)
+            registry.current = merged.feed_id
+            return {**entry_dict(merged, registry), "dropped_files": dropped}
 
     @app.put("/api/catalogue/current")
     def catalogue_set_current(payload: dict = Body(...)):

@@ -27,6 +27,11 @@ export const store = reactive({
   catalogue: [], // [{ feed_id, name, active, color, current, source, tables }]
   currentFeedId: null,
   newFeedPath: "",
+  merge: {
+    selected: [], // feed ids ticked for merging
+    name: "", // optional name for the merged feed
+    merging: false,
+  },
   snapAvailable: false,
   mode: "select",
   snapOn: true,
