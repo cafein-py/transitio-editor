@@ -844,9 +844,16 @@ def create_app(
             entries = list(base.iterdir())
         except PermissionError:
             raise HTTPException(403, f"not readable: {base}") from None
+        except OSError as error:  # e.g. the directory vanished meanwhile
+            raise HTTPException(404, f"cannot list: {error}") from None
         for entry in entries:
             try:
-                if entry.is_dir() and not entry.name.startswith("."):
+                if (
+                    entry.is_dir()
+                    and not entry.name.startswith(".")
+                    # only offer directories the browser could descend into
+                    and os.access(entry, os.R_OK | os.X_OK)
+                ):
                     subdirs.append(entry.name)
             except OSError:
                 continue  # unreadable entry: skip it

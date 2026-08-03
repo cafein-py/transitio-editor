@@ -183,11 +183,15 @@ async function refreshSummary() {
 }
 export { refreshSummary };
 
+let refreshSeq = 0; // an older, slower refresh must not overwrite a newer one
+
 async function refreshLayers(fit) {
+  const seq = ++refreshSeq;
   const [stops, shapes] = await Promise.all([
     api("GET", "/api/stops"),
     api("GET", "/api/shapes"),
   ]);
+  if (seq !== refreshSeq) return;
   lastStops = stops;
   map.getSource("stops").setData(stops);
   map.getSource("shapes").setData(shapes);
@@ -748,10 +752,10 @@ export function createMap() {
     });
 
     // Re-apply legend state chosen before the async load finished, so an
-    // early color-by switch, mode toggle or stops toggle isn't lost.
+    // early color-by switch, mode/visibility toggle isn't lost.
     setShapeColorBy(store.shapeColorBy);
     setHiddenModes([...store.hiddenModes]);
-    setStopsVisible(store.stopsVisible);
+    setFeedVisible(store.feedVisible); // also composes the stops toggle
 
     try {
       await refreshAll(true);

@@ -725,7 +725,10 @@ export async function downloadSelected() {
   if (s.bulk.running || !s.selected.length) return;
   const queue = s.results.filter((feed) => s.selected.includes(feed.id));
   if (!queue.length) return;
-  if (queue.length && !downloadBody(queue[0])) return; // crop misconfigured
+  // Snapshot the folder/crop settings once: a mid-run change to the
+  // controls must not alter (or abort) the remaining queue.
+  const template = downloadBody(queue[0]);
+  if (!template) return; // crop misconfigured
   s.bulk = { running: true, done: 0, total: queue.length };
   const failed = [];
   try {
@@ -738,8 +741,7 @@ export async function downloadSelected() {
         s.bulk.done += 1;
         continue;
       }
-      const body = downloadBody(feed);
-      if (!body) break; // settings changed mid-run; keep remaining selected
+      const body = { ...template, feed_id: feed.id };
       s.downloadingId = feed.id;
       try {
         await api("POST", "/api/catalogue/download", body);

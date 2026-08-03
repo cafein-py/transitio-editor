@@ -20,8 +20,22 @@ const q = ref(store.tableView.q);
 let timer = null;
 watch(q, (value) => {
   clearTimeout(timer);
-  timer = setTimeout(() => loadTable({ q: value, offset: 0 }), 300);
+  if (value === store.tableView.q) return; // programmatic sync, not typing
+  timer = setTimeout(() => {
+    if (store.tableView.open) loadTable({ q: value, offset: 0 });
+  }, 300);
 });
+// A store-side reset (e.g. a feed switch) must clear the input and any
+// pending debounce, or the old feed's query would reapply to the new one.
+watch(
+  () => store.tableView.q,
+  (value) => {
+    if (value !== q.value) {
+      clearTimeout(timer);
+      q.value = value;
+    }
+  },
+);
 
 function previous() {
   if (view.value.offset > 0) {
