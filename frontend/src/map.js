@@ -370,15 +370,38 @@ export function createMap() {
       filter: ["in", ["get", "shape_id"], ["literal", []]],
       paint: { "line-color": "#d81b60", "line-width": 6, "line-opacity": 0.6 },
     });
+    // Stop size follows the zoom, so a whole-region feed reads as dots
+    // instead of covering the map; street zooms keep the clickable size.
+    const stopRadius = (scale) => [
+      "interpolate",
+      ["linear"],
+      ["zoom"],
+      7,
+      1.5 * scale,
+      10,
+      3 * scale,
+      13,
+      6 * scale,
+      16,
+      9 * scale,
+    ];
     map.addLayer({
       id: "stops",
       type: "circle",
       source: "stops",
       paint: {
-        "circle-radius": 6,
+        "circle-radius": stopRadius(1),
         "circle-color": ["coalesce", ["get", "feed_color"], "#e67e22"],
         "circle-stroke-color": "#fff",
-        "circle-stroke-width": 1.5,
+        "circle-stroke-width": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          7,
+          0.5,
+          13,
+          1.5,
+        ],
       },
     });
     map.addLayer({
@@ -387,7 +410,7 @@ export function createMap() {
       source: "stops",
       filter: ["in", ["get", "stop_id"], ["literal", []]],
       paint: {
-        "circle-radius": 10,
+        "circle-radius": stopRadius(1.7),
         "circle-color": "rgba(216, 27, 96, 0.35)",
         "circle-stroke-color": "#d81b60",
         "circle-stroke-width": 2,
