@@ -32,12 +32,20 @@ onMounted(() => {
     <h1>transitio</h1>
     <TabBar />
     <CurrentFeedBar
-      v-show="store.activeTab === 'edit' || store.activeTab === 'report'"
+      v-show="
+        store.activeTab === 'view' ||
+        store.activeTab === 'edit' ||
+        store.activeTab === 'report'
+      "
     />
 
-    <div v-show="store.activeTab === 'edit'">
+    <!-- View: explore the loaded data without editing it. -->
+    <div v-show="store.activeTab === 'view'">
       <FeedSummary />
       <RouteLegend />
+    </div>
+
+    <div v-show="store.activeTab === 'edit'">
       <ModeBar />
       <StopInspector />
       <RouteForm />

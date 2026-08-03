@@ -9,7 +9,7 @@ export const SNAP_FILTERS = {
 };
 
 export const store = reactive({
-  activeTab: "edit",
+  activeTab: "view",
   source: null,
   tables: {},
   catalogue: [], // [{ feed_id, name, active, color, current, source, tables }]

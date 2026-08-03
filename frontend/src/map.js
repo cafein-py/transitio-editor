@@ -494,7 +494,7 @@ export function createMap() {
         // worth a hint; otherwise it falls through so a stop/shape point —
         // including a stop being moved — can be dropped onto a road.
         if (store.mode === "select" && !store.movingStop) {
-          store.status = "switch to the Network tab to inspect the network";
+          store.status = "switch to the OSM tab to inspect the network";
           event.preventDefault();
         }
         return;
@@ -511,7 +511,9 @@ export function createMap() {
       if (event.defaultPrevented || store.aoiDrawing) return;
       if (editTarget(store.activeTab) === "network") {
         handleNetworkClick(event);
-      } else {
+      } else if (store.activeTab === "edit") {
+        // Feed mutations only on the Edit tab: a mode left armed there (add
+        // stop, draw) must not fire from the read-only View tab.
         handleMapClick(event);
       }
     });

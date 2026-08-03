@@ -57,6 +57,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The sidebar tabs follow the workflow left to right — Search, Data
+  (the catalogue), the new View tab, Edit, OSM (the network tab), Report —
+  and the editor opens on View. The new View tab explores the loaded data
+  without editing it: the feed summary and the "Map display" legend live
+  there, and feed-mutating map clicks fire only from the Edit tab, so an
+  armed add-stop or draw mode cannot edit from View.
 - Downloading a feed no longer switches the view to the Catalogue tab, so
   several of an area's feeds can be downloaded in a row without the GUI
   bouncing away from the search results.
