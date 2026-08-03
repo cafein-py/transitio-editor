@@ -345,6 +345,18 @@ export function createMap() {
         "circle-stroke-width": 1,
       },
     });
+    // A white casing under the route lines separates them from the busy
+    // basemap (and from each other), keeping even light hues readable.
+    map.addLayer({
+      id: "shapes-casing",
+      type: "line",
+      source: "shapes",
+      paint: {
+        "line-color": "#ffffff",
+        "line-width": 5.5,
+        "line-opacity": 0.9,
+      },
+    });
     map.addLayer({
       id: "shapes",
       type: "line",
@@ -353,7 +365,7 @@ export function createMap() {
         // colored by transport mode by default; switchable to feed colors
         "line-color": modeColorExpression(),
         "line-width": 3,
-        "line-opacity": 0.8,
+        "line-opacity": 1,
       },
     });
     map.addLayer({
@@ -655,7 +667,7 @@ export function setNetworkVisible(visible) {
 }
 
 export function setFeedVisible(visible) {
-  setGroupVisible(["shapes", "shapes-highlight"], visible);
+  setGroupVisible(["shapes", "shapes-casing", "shapes-highlight"], visible);
   // Stops track both toggles: the feed group and the stops switch.
   setGroupVisible(["stops", "stops-highlight"], visible && store.stopsVisible);
 }
@@ -675,5 +687,7 @@ export function setShapeColorBy(colorBy) {
 
 export function setHiddenModes(hiddenCodes) {
   if (!map || !map.getLayer("shapes")) return;
-  map.setFilter("shapes", modeFilterExpression(hiddenCodes));
+  const filter = modeFilterExpression(hiddenCodes);
+  map.setFilter("shapes", filter);
+  map.setFilter("shapes-casing", filter); // the casing mirrors its line
 }
