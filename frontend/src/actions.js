@@ -9,6 +9,7 @@ export async function checkNetworkAvailable() {
   try {
     const body = await api("GET", "/api/network");
     store.network.available = Boolean(body.available);
+    store.network.source = body.source || null;
     // Both domains are visible by default: load the network eagerly so it
     // shows alongside the feed from the start, not only after opening the tab.
     if (store.network.available) await loadNetwork();
@@ -212,11 +213,12 @@ export async function acquireOsm(discardEdits = false) {
   acquire.downloading = true;
   acquire.error = "";
   try {
-    await api("POST", "/api/osm/download", {
+    const downloaded = await api("POST", "/api/osm/download", {
       bbox: resolved.bbox,
       url: resolved.url,
       discard_edits: discardEdits,
     });
+    net.source = downloaded.path;
   } catch (error) {
     // 409 on submitted-but-unsaved edits: confirm discarding, then retry once.
     if (

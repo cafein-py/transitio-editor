@@ -44,9 +44,9 @@ def main(argv=None):
     parser.add_argument(
         "--max-network-ways",
         type=int,
-        default=50000,
+        default=200000,
         help="refuse to serve an OSM network larger than this many ways "
-        "(default: 50000; 0 disables)",
+        "(default: 200000; 0 disables)",
     )
     parser.add_argument("--host", default="127.0.0.1", help="bind address")
     parser.add_argument("--port", type=int, default=8300, help="port")

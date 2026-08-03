@@ -40,6 +40,7 @@ export const store = reactive({
   aoiDrawing: false, // a rectangle drag is in progress
   network: {
     available: false, // an OSM extract is loaded (--osm-pbf or acquired)
+    source: null, // path of the current OSM extract, for the catalogue row
     loaded: false, // node/way GeoJSON fetched into the map
     loading: false,
     visible: true, // layer visibility toggle

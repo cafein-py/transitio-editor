@@ -137,7 +137,7 @@ def create_app(
     network_type="driving",
     snap_custom_filter=None,
     network_filter=None,
-    max_network_ways=50000,
+    max_network_ways=200000,
     allowed_hosts=None,
     catalog_factory=None,
 ):
@@ -173,7 +173,7 @@ def create_app(
         network served at ``GET /api/network/*`` (from ``osm_pbf``);
         defaults to all highways plus tram/rail/light_rail/subway. See
         :class:`~transitio.edit.OsmEditor`.
-    max_network_ways : int, default 50000
+    max_network_ways : int, default 200000
         Refuse to serve an OSM network with more ways than this (guards
         the browser); ``0`` disables the cap.
     allowed_hosts : list of str, optional
@@ -299,7 +299,8 @@ def create_app(
             raise HTTPException(
                 413,
                 f"OSM network has {way_count} ways, over the "
-                f"{max_network_ways} limit (raise --max-network-ways)",
+                f"{max_network_ways} limit (use a smaller area, or raise "
+                "--max-network-ways)",
             )
         return loaded
 
@@ -978,7 +979,17 @@ def create_app(
 
     @app.get("/api/network")
     def network_summary():
-        return {"available": osm_state["source"] is not None}
+        # Source and counts let the catalogue list the OSM extract alongside
+        # the GTFS feeds; counts exist only once the network is loaded.
+        with lock:
+            body = {"available": osm_state["source"] is not None}
+            if osm_state["source"] is not None:
+                body["source"] = os.fspath(osm_state["source"])
+                editor = osm_state["editor"]
+                if editor is not None:
+                    body["nodes"] = int(len(editor.nodes))
+                    body["ways"] = int(len(editor.ways))
+        return body
 
     def _network_int_id(raw):
         # Provisional elements carry negative ids. Parse exactly (no float,
