@@ -2033,19 +2033,20 @@ def test_reserved_route_types_normalise_to_unknown():
 
 
 def test_bad_paths_are_client_errors(editor):
+    # a NUL byte is invalid on every platform (an unknown ~user is not: on
+    # Windows expanduser resolves it without raising), so it probes the
+    # malformed-path handling portably: a 4xx, never an unhandled 500.
+    nul_path = "bad" + chr(0) + "dir"
     client = TestClient(create_app(editor))
-    # an unknown ~user must not become a 500 in the folder browser…
     assert (
-        client.get("/api/fs/dirs", params={"path": "~no-such-user-xyz/dir"}).status_code
-        == 404
+        client.get("/api/fs/dirs", params={"path": nul_path}).status_code == 404
     )
-    # …nor in the download-directory handling
     stub = _StubCatalog([_catalog_feed()], token="tok")
     with_dir = TestClient(create_app(editor, catalog_factory=lambda: stub))
     assert (
         with_dir.post(
             "/api/catalogue/download",
-            json={"feed_id": "mdb-1", "directory": "~no-such-user-xyz/dir"},
+            json={"feed_id": "mdb-1", "directory": nul_path},
         ).status_code
         == 422
     )
