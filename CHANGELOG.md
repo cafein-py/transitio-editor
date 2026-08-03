@@ -44,6 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Downloading a feed no longer switches the view to the Catalogue tab, so
+  several of an area's feeds can be downloaded in a row without the GUI
+  bouncing away from the search results.
 - Routes whose type could not be determined are a toggleable "other /
   unknown" legend row of their own — hidden by default so unclassifiable
   lines don't clutter the map — instead of staying always visible, and the

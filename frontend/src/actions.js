@@ -583,7 +583,9 @@ export async function downloadFeed(feed) {
     await api("POST", "/api/catalogue/download", body);
     await loadCatalogue();
     await mapBridge.refreshAll(true);
-    store.activeTab = "catalogue";
+    // Stay on the Search tab: downloading many of an area's feeds in a row
+    // shouldn't bounce the view to the Catalogue each time. The green check
+    // on the result row and the status line confirm the download.
     store.status = `downloaded ${feed.provider || feed.id}`;
   } catch (error) {
     store.status = error.message;
