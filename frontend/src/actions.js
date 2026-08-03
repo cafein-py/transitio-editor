@@ -68,6 +68,7 @@ export async function deleteNetworkWay() {
   try {
     await api("DELETE", `/api/network/ways/${selected.id}`);
     store.network.selected = null;
+    mapBridge.setSelectedNetworkFeature(null);
     await mapBridge.fetchNetwork();
     store.status = "";
   } catch (error) {
@@ -104,6 +105,7 @@ export async function deleteNetworkNode() {
   try {
     await api("DELETE", `/api/network/nodes/${selected.id}`);
     store.network.selected = null;
+    mapBridge.setSelectedNetworkFeature(null);
     await mapBridge.fetchNetwork();
     store.status = "";
   } catch (error) {
@@ -141,6 +143,7 @@ export async function resetNetwork() {
   try {
     await api("POST", "/api/network/reset");
     store.network.selected = null;
+    mapBridge.setSelectedNetworkFeature(null);
     setNetworkMode("select"); // clears an in-progress draw and its preview
     await mapBridge.fetchNetwork();
     store.status = "network edits discarded";
@@ -241,6 +244,7 @@ export async function acquireOsm(discardEdits = false) {
   net.available = true;
   net.loaded = false;
   net.selected = null;
+  mapBridge.setSelectedNetworkFeature(null);
   net.error = "";
   setNetworkMode("select"); // clears any in-progress draw/move
   try {
@@ -519,6 +523,7 @@ export async function addFeed() {
 function resetFeedScopedState() {
   setMode("select"); // also clears movingStop and the draw preview
   store.inspector = null;
+  mapBridge.clearFeedSelection();
   store.tripStops.length = 0;
   store.tripPicking = false;
   store.trip = null;

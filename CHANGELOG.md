@@ -64,6 +64,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hovering a stop or route shape while viewing opens an attribute card
   with its key fields; clicking a shape pins the card. Features are
   selectable whether editing is on or off.
+- Selection halos: the selected stop, route shape, or OSM node/way is
+  marked on the map with an amber underlay, cleared when the selection is
+  dropped (card closed, feed switched, element deleted, network reset).
 
 ### Changed
 

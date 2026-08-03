@@ -16,6 +16,10 @@ import {
 } from "./modes.js";
 
 let map = null;
+// Selection-halo styling: amber reads over the basemap and clashes with no
+// mode or feed color; the false filter means "nothing selected".
+const SELECT_COLOR = "#ffd60a";
+const NO_SELECTION = ["boolean", false];
 // Resolves once the map's sources and layers exist, so network data applied
 // from actions never races the map "load" event.
 let resolveMapReady;
@@ -439,6 +443,68 @@ export function createMap() {
       },
     });
 
+    // Selection halos: an amber underlay marks the selected feature, in
+    // every domain (inserted beneath its feature layer via beforeId).
+    map.addLayer(
+      {
+        id: "shapes-selected",
+        type: "line",
+        source: "shapes",
+        filter: NO_SELECTION,
+        paint: {
+          "line-color": SELECT_COLOR,
+          "line-width": 9,
+          "line-opacity": 0.85,
+        },
+      },
+      "shapes",
+    );
+    map.addLayer(
+      {
+        id: "stops-selected",
+        type: "circle",
+        source: "stops",
+        filter: NO_SELECTION,
+        paint: {
+          "circle-radius": stopRadius(1.8),
+          "circle-color": SELECT_COLOR,
+          "circle-opacity": 0.9,
+        },
+      },
+      "stops",
+    );
+    map.addLayer(
+      {
+        id: "network-ways-selected",
+        type: "line",
+        source: "network-ways",
+        filter: NO_SELECTION,
+        layout: { visibility: "none" },
+        paint: {
+          "line-color": SELECT_COLOR,
+          "line-width": 6,
+          "line-opacity": 0.85,
+        },
+      },
+      "network-ways",
+    );
+    map.addLayer(
+      {
+        id: "network-nodes-selected",
+        type: "circle",
+        source: "network-nodes",
+        minzoom: 15,
+        filter: NO_SELECTION,
+        layout: { visibility: "none" },
+        paint: {
+          "circle-radius": 7,
+          "circle-color": SELECT_COLOR,
+          "circle-opacity": 0.9,
+        },
+      },
+      "network-nodes",
+    );
+
     map.on("click", "stops", (event) => {
       if (store.aoiDrawing) return; // a rectangle gesture, not a selection
       if (store.movingStop || store.mode !== "select") return;
@@ -472,6 +538,7 @@ export function createMap() {
           stopId: properties.stop_id,
           name: properties.stop_name || "",
         };
+        setSelectedStop(properties);
       }
       event.preventDefault();
     });
@@ -504,6 +571,7 @@ export function createMap() {
         event.features.find((f) => f.properties.osm_type === "node") ||
         event.features[0];
       store.network.selected = { ...feature.properties };
+      setSelectedNetworkFeature(feature.properties);
       store.status = "";
       event.preventDefault();
     });
@@ -583,12 +651,15 @@ export function createMap() {
       });
     }
 
-    // Shapes are selectable with editing on or off: a click pins their card.
+    // Shapes are selectable with editing on or off: a click pins their card
+    // and halos the line; closing the card clears the halo.
+    pinnedPopup.on("close", () => setSelectedShape(null));
     map.on("click", "shapes", (event) => {
       if (event.defaultPrevented || store.aoiDrawing) return;
       if (store.activeTab !== "view") return;
       if (store.mode !== "select" || store.movingStop) return;
       hoverPopup.remove();
+      setSelectedShape(event.features[0].properties);
       pinnedPopup
         .setLngLat(event.lngLat)
         .setDOMContent(featureCard(event.features[0], "shape"))
@@ -754,17 +825,78 @@ function setGroupVisible(layers, visible) {
 }
 
 export function setNetworkVisible(visible) {
-  setGroupVisible(["network-ways", "network-nodes"], visible);
+  setGroupVisible(
+    ["network-ways", "network-nodes", "network-ways-selected", "network-nodes-selected"],
+    visible,
+  );
 }
 
 export function setFeedVisible(visible) {
-  setGroupVisible(["shapes", "shapes-casing", "shapes-highlight"], visible);
+  setGroupVisible(
+    ["shapes", "shapes-casing", "shapes-highlight", "shapes-selected"],
+    visible,
+  );
   // Stops track both toggles: the feed group and the stops switch.
-  setGroupVisible(["stops", "stops-highlight"], visible && store.stopsVisible);
+  setGroupVisible(
+    ["stops", "stops-highlight", "stops-selected"],
+    visible && store.stopsVisible,
+  );
 }
 
 export function setStopsVisible(visible) {
-  setGroupVisible(["stops", "stops-highlight"], store.feedVisible && visible);
+  setGroupVisible(
+    ["stops", "stops-highlight", "stops-selected"],
+    store.feedVisible && visible,
+  );
+}
+
+export function setSelectedStop(properties) {
+  if (!map || !map.getLayer("stops-selected")) return;
+  map.setFilter(
+    "stops-selected",
+    properties
+      ? [
+          "all",
+          ["==", ["get", "stop_id"], properties.stop_id],
+          ["==", ["get", "feed_id"], properties.feed_id],
+        ]
+      : NO_SELECTION,
+  );
+}
+
+export function setSelectedShape(properties) {
+  if (!map || !map.getLayer("shapes-selected")) return;
+  map.setFilter(
+    "shapes-selected",
+    properties
+      ? [
+          "all",
+          ["==", ["get", "shape_id"], properties.shape_id],
+          ["==", ["get", "feed_id"], properties.feed_id],
+        ]
+      : NO_SELECTION,
+  );
+}
+
+export function setSelectedNetworkFeature(properties) {
+  if (!map || !map.getLayer("network-ways-selected")) return;
+  map.setFilter(
+    "network-ways-selected",
+    properties && properties.osm_type === "way"
+      ? ["==", ["get", "id"], properties.id]
+      : NO_SELECTION,
+  );
+  map.setFilter(
+    "network-nodes-selected",
+    properties && properties.osm_type === "node"
+      ? ["==", ["get", "id"], properties.id]
+      : NO_SELECTION,
+  );
+}
+
+export function clearFeedSelection() {
+  setSelectedStop(null);
+  setSelectedShape(null);
 }
 
 export function setShapeColorBy(colorBy) {
