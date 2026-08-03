@@ -6,6 +6,7 @@ import {
   UNKNOWN_MODE_COLOR,
   modeColorExpression,
   modeFilterExpression,
+  presentModeCodes,
 } from "../src/modes.js";
 
 describe("modeColorExpression", () => {
@@ -43,5 +44,21 @@ describe("modeFilterExpression", () => {
     expect(UNKNOWN_MODE.code).toBe(-1);
     const filter = modeFilterExpression([UNKNOWN_MODE.code]);
     expect(filter[1][2]).toEqual(["literal", [-1]]);
+  });
+});
+
+describe("presentModeCodes", () => {
+  it("collects distinct route types, mapping missing ones to -1", () => {
+    const features = [
+      { properties: { route_type: 3 } },
+      { properties: { route_type: 0 } },
+      { properties: { route_type: 3 } },
+      { properties: {} }, // hand-drawn shape without a resolved type
+    ];
+    expect(presentModeCodes(features)).toEqual([-1, 0, 3]);
+  });
+
+  it("is empty for an empty layer", () => {
+    expect(presentModeCodes([])).toEqual([]);
   });
 });

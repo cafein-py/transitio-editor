@@ -11,6 +11,7 @@ import {
   feedColorExpression,
   modeColorExpression,
   modeFilterExpression,
+  presentModeCodes,
 } from "./modes.js";
 
 let map = null;
@@ -167,6 +168,8 @@ async function refreshLayers(fit) {
   lastStops = stops;
   map.getSource("stops").setData(stops);
   map.getSource("shapes").setData(shapes);
+  // The legend offers only modes the loaded feeds actually contain.
+  store.presentModes = presentModeCodes(shapes.features);
   if (fit && stops.features.length) {
     const bounds = new maplibregl.LngLatBounds();
     for (const feature of stops.features) {

@@ -32,9 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Routes whose type could not be determined are a toggleable "other /
-  unknown" legend row of their own instead of staying always visible, so
-  unchecking every mode really empties the shape layer; the shape-to-route
-  join also tolerates stray whitespace in feed id columns.
+  unknown" legend row of their own — hidden by default so unclassifiable
+  lines don't clutter the map — instead of staying always visible, and the
+  shape-to-route join tolerates stray whitespace in feed id columns. The
+  legend lists only modes that exist in the loaded feeds and gains
+  select-all / deselect-all buttons.
 - The default `--max-network-ways` guard is 200000 (was 50000), so a
   mid-size city's routable network — e.g. Oulu at ~86k ways — loads without
   tripping the limit when acquired from the GUI; the limit error now also

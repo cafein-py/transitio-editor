@@ -3,6 +3,7 @@
 // the status line and marks the validation report stale.
 import { api } from "./api.js";
 import * as mapBridge from "./map.js";
+import { MODES, UNKNOWN_MODE } from "./modes.js";
 import { forms, resetForms, store } from "./store.js";
 
 export async function checkNetworkAvailable() {
@@ -285,6 +286,12 @@ export function toggleModeHidden(code) {
   if (index === -1) hidden.push(code);
   else hidden.splice(index, 1);
   mapBridge.setHiddenModes([...hidden]);
+}
+
+export function setAllModesHidden(hidden) {
+  const codes = hidden ? [...MODES.map((mode) => mode.code), UNKNOWN_MODE.code] : [];
+  store.hiddenModes.splice(0, store.hiddenModes.length, ...codes);
+  mapBridge.setHiddenModes([...store.hiddenModes]);
 }
 
 export function wrap(action) {

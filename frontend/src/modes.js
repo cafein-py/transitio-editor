@@ -24,6 +24,17 @@ export const UNKNOWN_MODE = {
   color: UNKNOWN_MODE_COLOR,
 };
 
+// The distinct mode codes present in a shapes FeatureCollection, sorted;
+// a missing route_type counts as the unknown sentinel -1. Drives which
+// rows the legend offers (only modes the loaded feeds actually contain).
+export function presentModeCodes(features) {
+  const codes = new Set();
+  for (const feature of features) {
+    codes.add(feature.properties?.route_type ?? -1);
+  }
+  return [...codes].sort((a, b) => a - b);
+}
+
 export function modeColorExpression() {
   const expression = ["match", ["coalesce", ["get", "route_type"], -1]];
   for (const mode of MODES) expression.push(mode.code, mode.color);

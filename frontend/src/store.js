@@ -36,7 +36,10 @@ export const store = reactive({
   feedVisible: true, // GTFS layer group visibility toggle
   stopsVisible: true, // stop markers shown (within the feed group)
   shapeColorBy: "mode", // shapes colored by transport "mode" | "feed"
-  hiddenModes: [], // route_type codes hidden from the shapes layer (-1 unknown)
+  // route_type codes hidden from the shapes layer; unknown-mode shapes
+  // (sentinel -1) start hidden so unclassifiable lines don't clutter the map.
+  hiddenModes: [-1],
+  presentModes: [], // mode codes present in the loaded feeds' shapes
   aoi: null, // a drawn [minx, miny, maxx, maxy] area, shared by OSM + GTFS
   aoiDrawing: false, // a rectangle drag is in progress
   network: {

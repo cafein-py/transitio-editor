@@ -109,3 +109,5 @@ table.times input { width: 76px; padding: 3px; }
 .route-legend .legend-colorby label { display: flex; gap: 3px; align-items: center; }
 .route-legend .legend-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; font-size: 12px; }
 .route-legend .legend-mode { display: flex; gap: 4px; align-items: center; }
+.route-legend .legend-all { display: flex; gap: 6px; margin-top: 6px; }
+.route-legend .legend-all button { padding: 2px 8px; font-size: 11px; }
