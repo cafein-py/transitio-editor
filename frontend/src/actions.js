@@ -269,6 +269,11 @@ export function toggleFeedVisible() {
   mapBridge.setFeedVisible(store.feedVisible);
 }
 
+export function toggleStopsVisible() {
+  store.stopsVisible = !store.stopsVisible;
+  mapBridge.setStopsVisible(store.stopsVisible);
+}
+
 export function setShapeColorBy(colorBy) {
   store.shapeColorBy = colorBy;
   mapBridge.setShapeColorBy(colorBy);

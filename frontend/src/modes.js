@@ -14,8 +14,15 @@ export const MODES = [
   { code: 12, label: "monorail", color: "#c2185b" },
 ];
 
-// Shapes with no known route type (e.g. hand-drawn, or no trip yet).
+// Shapes with no known route type (e.g. hand-drawn, or no trip yet). They
+// render and toggle like a mode of their own, keyed by the sentinel -1 that
+// the color/filter expressions coalesce a missing route_type to.
 export const UNKNOWN_MODE_COLOR = "#c0392b";
+export const UNKNOWN_MODE = {
+  code: -1,
+  label: "other / unknown",
+  color: UNKNOWN_MODE_COLOR,
+};
 
 export function modeColorExpression() {
   const expression = ["match", ["coalesce", ["get", "route_type"], -1]];

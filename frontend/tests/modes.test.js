@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MODES,
+  UNKNOWN_MODE,
   UNKNOWN_MODE_COLOR,
   modeColorExpression,
   modeFilterExpression,
@@ -30,10 +31,17 @@ describe("modeFilterExpression", () => {
     expect(modeFilterExpression([])).toBeNull();
   });
 
-  it("hides listed codes but keeps unknown-mode shapes visible", () => {
+  it("hides listed codes; unknown-mode shapes stay unless -1 is listed", () => {
     const filter = modeFilterExpression([3, 1]);
     expect(filter[0]).toBe("!");
-    // unknown route_type coalesces to -1, which is not in the hidden list
+    // unknown route_type coalesces to -1, which is not in this hidden list
     expect(filter[1][2]).toEqual(["literal", [3, 1]]);
+  });
+
+  it("hides unknown-mode shapes via the sentinel row", () => {
+    // the legend's "other / unknown" row hides shapes with no route_type
+    expect(UNKNOWN_MODE.code).toBe(-1);
+    const filter = modeFilterExpression([UNKNOWN_MODE.code]);
+    expect(filter[1][2]).toEqual(["literal", [-1]]);
   });
 });

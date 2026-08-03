@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A "show stops" toggle: the Edit tab's legend panel (now "Map display")
+  can hide the stop markers independently of the route shapes.
 - A current-feed bar on the Edit and Report tabs: with several feeds in the
   catalogue, the feed that edits, validation and save target is now always
   visible (color swatch + name) and switchable in place; the validation
@@ -29,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Routes whose type could not be determined are a toggleable "other /
+  unknown" legend row of their own instead of staying always visible, so
+  unchecking every mode really empties the shape layer; the shape-to-route
+  join also tolerates stray whitespace in feed id columns.
 - The default `--max-network-ways` guard is 200000 (was 50000), so a
   mid-size city's routable network — e.g. Oulu at ~86k ways — loads without
   tripping the limit when acquired from the GUI; the limit error now also

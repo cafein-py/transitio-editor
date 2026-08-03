@@ -546,9 +546,10 @@ export function createMap() {
     });
 
     // Re-apply legend state chosen before the async load finished, so an
-    // early color-by switch or mode toggle isn't lost.
+    // early color-by switch, mode toggle or stops toggle isn't lost.
     setShapeColorBy(store.shapeColorBy);
     setHiddenModes([...store.hiddenModes]);
+    setStopsVisible(store.stopsVisible);
 
     try {
       await refreshAll(true);
@@ -651,7 +652,13 @@ export function setNetworkVisible(visible) {
 }
 
 export function setFeedVisible(visible) {
-  setGroupVisible(["stops", "shapes", "stops-highlight", "shapes-highlight"], visible);
+  setGroupVisible(["shapes", "shapes-highlight"], visible);
+  // Stops track both toggles: the feed group and the stops switch.
+  setGroupVisible(["stops", "stops-highlight"], visible && store.stopsVisible);
+}
+
+export function setStopsVisible(visible) {
+  setGroupVisible(["stops", "stops-highlight"], store.feedVisible && visible);
 }
 
 export function setShapeColorBy(colorBy) {

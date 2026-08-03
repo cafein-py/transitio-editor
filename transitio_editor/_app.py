@@ -86,6 +86,11 @@ def _base_route_type(value):
     return None
 
 
+def _clean_id(value):
+    # id columns in real feeds occasionally carry stray whitespace
+    return str(value).strip() if value is not None else ""
+
+
 def _shape_route_types(editor):
     """Map each shape_id to its route's base route_type via the trips table.
 
@@ -100,12 +105,16 @@ def _shape_route_types(editor):
         return {}
     if {"route_id", "route_type"} - set(routes.columns):
         return {}
-    route_types = dict(zip(routes["route_id"], routes["route_type"]))
+    route_types = {
+        _clean_id(route_id): route_type
+        for route_id, route_type in zip(routes["route_id"], routes["route_type"])
+    }
     mapping = {}
     for route_id, shape_id in zip(trips["route_id"], trips["shape_id"]):
+        shape_id = _clean_id(shape_id)
         if not shape_id or shape_id in mapping:
             continue
-        base = _base_route_type(route_types.get(route_id))
+        base = _base_route_type(route_types.get(_clean_id(route_id)))
         if base is not None:
             mapping[shape_id] = base
     return mapping
@@ -424,7 +433,7 @@ def create_app(
                     "feed_id": entry.feed_id,
                     "feed_color": entry.color,
                 }
-                route_type = route_types.get(row["shape_id"])
+                route_type = route_types.get(_clean_id(row["shape_id"]))
                 if route_type is not None:
                     properties["route_type"] = route_type
                 features.append(
