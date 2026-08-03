@@ -11,7 +11,13 @@ def main(argv=None):
         prog="transitio-editor",
         description="edit a GTFS feed in the local map GUI",
     )
-    parser.add_argument("feed", type=pathlib.Path, help="GTFS feed zip")
+    parser.add_argument(
+        "feed",
+        nargs="?",
+        type=pathlib.Path,
+        help="GTFS feed zip; omit to start empty and build a feed from "
+        "scratch or load feeds from the GUI",
+    )
     parser.add_argument(
         "--osm-pbf",
         type=pathlib.Path,
@@ -53,11 +59,11 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     import uvicorn
-    from transitio.edit import FeedEditor
+    from transitio.edit import FeedBuilder, FeedEditor
 
     from transitio_editor import create_app
 
-    if not args.feed.exists():
+    if args.feed is not None and not args.feed.exists():
         parser.error(f"feed not found: {args.feed}")
     if args.host not in ("127.0.0.1", "localhost", "::1") and not args.allow_remote:
         parser.error(
@@ -84,7 +90,9 @@ def main(argv=None):
         if args.network_filter
         else None
     )
-    editor = FeedEditor(args.feed)
+    # Without a feed the editor opens on an empty builder: build a feed from
+    # scratch on the Edit tab, or load/download feeds via Catalogue/Search.
+    editor = FeedEditor(args.feed) if args.feed is not None else FeedBuilder()
     # Host-header pinning stays on in remote mode: only the address the
     # server was bound under is accepted, not arbitrary rebindable names.
     allowed = None

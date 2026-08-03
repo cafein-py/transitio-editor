@@ -178,6 +178,33 @@ def test_cli_requires_existing_feed(tmp_path):
         main([str(tmp_path / "absent.zip")])
 
 
+def test_cli_starts_without_feed(monkeypatch):
+    # no positional feed: the editor opens on an empty builder.
+    import uvicorn
+
+    from transitio_editor.cli import main
+
+    served = {}
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: served.update(app=app))
+    assert main([]) == 0
+    client = TestClient(served["app"])
+    summary = client.get("/api/feed").json()
+    assert summary["source"] is None and summary["tables"] == {}
+    # the empty builder is editable from the GUI
+    assert (
+        client.post(
+            "/api/agencies",
+            json={
+                "agency_id": "a",
+                "agency_name": "A",
+                "agency_url": "https://a.example",
+                "agency_timezone": "Europe/Helsinki",
+            },
+        ).status_code
+        == 200
+    )
+
+
 def test_full_builder_surface_over_http(tmp_path):
     client = TestClient(create_app(FeedBuilder()))
     assert (
