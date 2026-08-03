@@ -45,6 +45,72 @@ def _write_sidecar(path, text):
         raise
 
 
+def _base_route_type(value):
+    """Normalise a GTFS route_type (incl. extended codes) to a base mode.
+
+    Extended types (Google extension, 100-1799) map onto their base GTFS
+    family so the frontend only sees codes 0-12; unknown values yield None.
+    """
+    try:
+        code = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    if 0 <= code <= 12:
+        return code
+    if 100 <= code < 200:  # railway service
+        return 2
+    if 200 <= code < 300:  # coach service
+        return 3
+    if 300 <= code < 400:  # suburban railway service
+        return 2
+    if code == 405:  # monorail
+        return 12
+    if 400 <= code < 500:  # urban railway / metro service
+        return 1
+    if 500 <= code < 700:  # metro / underground service
+        return 1
+    if 700 <= code < 800:  # bus service
+        return 3
+    if code == 800:  # trolleybus service
+        return 11
+    if 900 <= code < 1000:  # tram service
+        return 0
+    if 1000 <= code < 1100:  # water transport service
+        return 4
+    if 1200 <= code < 1300:  # ferry service
+        return 4
+    if 1300 <= code < 1400:  # aerial lift service
+        return 6
+    if 1400 <= code < 1500:  # funicular service
+        return 7
+    return None
+
+
+def _shape_route_types(editor):
+    """Map each shape_id to its route's base route_type via the trips table.
+
+    A shape shared by several routes takes the first trip's route.
+    """
+    tables = getattr(editor, "tables", {})
+    trips = tables.get("trips.txt")
+    routes = tables.get("routes.txt")
+    if trips is None or routes is None:
+        return {}
+    if {"shape_id", "route_id"} - set(trips.columns):
+        return {}
+    if {"route_id", "route_type"} - set(routes.columns):
+        return {}
+    route_types = dict(zip(routes["route_id"], routes["route_type"]))
+    mapping = {}
+    for route_id, shape_id in zip(trips["route_id"], trips["shape_id"]):
+        if not shape_id or shape_id in mapping:
+            continue
+        base = _base_route_type(route_types.get(route_id))
+        if base is not None:
+            mapping[shape_id] = base
+    return mapping
+
+
 def _network_features(frame):
     """A GeoJSON FeatureCollection of an OsmEditor nodes/ways frame."""
     geometry_name = frame.geometry.name
@@ -349,18 +415,20 @@ def create_app(
                 frame = entry.editor.shapes
             except ValueError:
                 continue
+            route_types = _shape_route_types(entry.editor)
             for _, row in frame.iterrows():
                 if row.geometry is None:
                     continue
+                properties = {
+                    "shape_id": row["shape_id"],
+                    "feed_id": entry.feed_id,
+                    "feed_color": entry.color,
+                }
+                route_type = route_types.get(row["shape_id"])
+                if route_type is not None:
+                    properties["route_type"] = route_type
                 features.append(
-                    _geojson_feature(
-                        row.geometry.__geo_interface__,
-                        {
-                            "shape_id": row["shape_id"],
-                            "feed_id": entry.feed_id,
-                            "feed_color": entry.color,
-                        },
-                    )
+                    _geojson_feature(row.geometry.__geo_interface__, properties)
                 )
         return {"type": "FeatureCollection", "features": features}
 

@@ -12,6 +12,7 @@ import SearchPanel from "./components/SearchPanel.vue";
 import FeedSummary from "./components/FeedSummary.vue";
 import ModeBar from "./components/ModeBar.vue";
 import RouteForm from "./components/RouteForm.vue";
+import RouteLegend from "./components/RouteLegend.vue";
 import SaveBar from "./components/SaveBar.vue";
 import StopInspector from "./components/StopInspector.vue";
 import TabBar from "./components/TabBar.vue";
@@ -36,6 +37,7 @@ onMounted(() => {
 
     <div v-show="store.activeTab === 'edit'">
       <FeedSummary />
+      <RouteLegend />
       <ModeBar />
       <StopInspector />
       <RouteForm />
