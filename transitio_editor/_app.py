@@ -71,7 +71,7 @@ def create_app(
     network_type="driving",
     snap_custom_filter=None,
     network_filter=None,
-    max_network_ways=50000,
+    max_network_ways=200000,
     allowed_hosts=None,
     catalog_factory=None,
 ):
@@ -107,7 +107,7 @@ def create_app(
         network served at ``GET /api/network/*`` (from ``osm_pbf``);
         defaults to all highways plus tram/rail/light_rail/subway. See
         :class:`~transitio.edit.OsmEditor`.
-    max_network_ways : int, default 50000
+    max_network_ways : int, default 200000
         Refuse to serve an OSM network with more ways than this (guards
         the browser); ``0`` disables the cap.
     allowed_hosts : list of str, optional
@@ -233,7 +233,8 @@ def create_app(
             raise HTTPException(
                 413,
                 f"OSM network has {way_count} ways, over the "
-                f"{max_network_ways} limit (raise --max-network-ways)",
+                f"{max_network_ways} limit (use a smaller area, or raise "
+                "--max-network-ways)",
             )
         return loaded
 

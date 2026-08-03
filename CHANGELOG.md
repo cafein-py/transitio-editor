@@ -9,12 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A current-feed bar on the Edit and Report tabs: with several feeds in the
+  catalogue, the feed that edits, validation and save target is now always
+  visible (color swatch + name) and switchable in place; the validation
+  report header also names the feed it was produced for.
 - The Catalogue tab lists the loaded OSM extract alongside the GTFS feeds,
   so all loaded data is visible in one place: an OSM row with the extract
   name, node/way counts and the show-on-map toggle. GTFS and OSM entries
   carry color-coded badges (matching their map layers) to tell the kinds
   apart; `GET /api/network` now reports the extract source and, once
   loaded, its node/way counts.
+
+### Changed
+
+- The default `--max-network-ways` guard is 200000 (was 50000), so a
+  mid-size city's routable network — e.g. Oulu at ~86k ways — loads without
+  tripping the limit when acquired from the GUI; the limit error now also
+  suggests using a smaller area.
+
+### Fixed
+
+- The sidebar is wide enough (with slightly more compact tab buttons) for
+  all five tabs to share one row, so the Report tab is no longer wrapped or
+  cut off.
 
 ## 0.6.1 — 2026-08-03
 
