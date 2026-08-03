@@ -207,7 +207,10 @@ function sortArrow(key) {
             <button
               v-else-if="feed.downloadable"
               class="download"
-              :disabled="store.search.downloadingId === feed.id"
+              :disabled="
+                store.search.downloadingId === feed.id ||
+                store.search.bulk.running
+              "
               @click="downloadFeed(feed)"
             >
               {{ store.search.downloadingId === feed.id ? "…" : "Download" }}

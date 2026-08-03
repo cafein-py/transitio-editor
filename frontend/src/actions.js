@@ -314,8 +314,11 @@ export function wrap(action) {
 export function toggleEditMode() {
   store.editMode = !store.editMode;
   // Leaving edit mode disarms any pending map mutation (add stop, draw,
-  // move) so the read-only view really is read-only.
-  if (!store.editMode) setMode("select");
+  // move, trip-stop picking) so the read-only view really is read-only.
+  if (!store.editMode) {
+    setMode("select");
+    store.tripPicking = false;
+  }
 }
 
 let tableSeq = 0; // only the latest table request may write the view
@@ -389,14 +392,16 @@ export function cancelShape() {
 }
 
 export const finishShape = wrap(async () => {
-  if (mapBridge.getPreviewCoords().length < 2) {
+  // Wait out any in-flight snap so the newest drawn point is included.
+  const coords = await mapBridge.previewCoordsSettled();
+  if (coords.length < 2) {
     throw new Error("draw at least two points first");
   }
   const shapeId = prompt("shape_id?");
   if (!shapeId) return;
   await api("POST", "/api/shapes", {
     shape_id: shapeId,
-    points: mapBridge.getPreviewCoords().map(([lon, lat]) => [lat, lon]),
+    points: coords.map(([lon, lat]) => [lat, lon]),
   });
   cancelShape();
   await mapBridge.refreshAll(false);
@@ -731,6 +736,7 @@ export async function downloadSelected() {
   if (!template) return; // crop misconfigured
   s.bulk = { running: true, done: 0, total: queue.length };
   const failed = [];
+  let skipped = 0;
   try {
     for (const feed of queue) {
       // Re-check against the live catalogue: a feed downloaded individually
@@ -739,6 +745,7 @@ export async function downloadSelected() {
         const stale = s.selected.indexOf(feed.id);
         if (stale !== -1) s.selected.splice(stale, 1);
         s.bulk.done += 1;
+        skipped += 1;
         continue;
       }
       const body = { ...template, feed_id: feed.id };
@@ -756,10 +763,12 @@ export async function downloadSelected() {
       }
     }
     await mapBridge.refreshAll(true);
-    const ok = s.bulk.done - failed.length;
-    store.status = failed.length
+    const ok = s.bulk.done - failed.length - skipped;
+    let summary = failed.length
       ? `downloaded ${ok} of ${s.bulk.total} feeds — failed: ${failed.join(", ")}`
       : `downloaded ${ok} feeds`;
+    if (skipped) summary += ` (${skipped} already in the catalogue)`;
+    store.status = summary;
   } finally {
     s.bulk = { running: false, done: 0, total: 0 };
   }

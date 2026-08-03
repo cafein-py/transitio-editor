@@ -44,6 +44,18 @@ export function getPreviewCoords() {
   return previewCoords;
 }
 
+let previewSettled = Promise.resolve(); // the latest draw/snap update
+
+// The preview after any in-flight snap lands — what Finish must save.
+export async function previewCoordsSettled() {
+  try {
+    await previewSettled;
+  } catch (error) {
+    /* the click handler already reported the snap failure */
+  }
+  return previewCoords;
+}
+
 export function setCursor(kind) {
   if (map) map.getCanvas().style.cursor = kind;
 }
@@ -284,18 +296,24 @@ async function handleMapClick(event) {
     }
     if (store.mode === "draw") {
       drawnPoints.push([lat, lng]);
-      if (store.snapAvailable && store.snapOn && drawnPoints.length >= 2) {
-        const sequence = ++drawSequence;
-        const request = { waypoints: [...drawnPoints] };
-        const filter = SNAP_FILTERS[store.snapNetwork];
-        if (filter) request.custom_filter = filter;
-        const feature = await api("POST", "/api/shapes/snap", request);
-        if (sequence !== drawSequence) return; // superseded by a newer click
-        previewCoords = feature.geometry.coordinates;
-      } else {
-        previewCoords = drawnPoints.map(([a, b]) => [b, a]);
-      }
-      renderPreview();
+      // Tracked as a promise so Finish can wait for the newest geometry
+      // instead of saving a preview that predates a pending snap.
+      const update = (async () => {
+        if (store.snapAvailable && store.snapOn && drawnPoints.length >= 2) {
+          const sequence = ++drawSequence;
+          const request = { waypoints: [...drawnPoints] };
+          const filter = SNAP_FILTERS[store.snapNetwork];
+          if (filter) request.custom_filter = filter;
+          const feature = await api("POST", "/api/shapes/snap", request);
+          if (sequence !== drawSequence) return; // superseded by a newer click
+          previewCoords = feature.geometry.coordinates;
+        } else {
+          previewCoords = drawnPoints.map(([a, b]) => [b, a]);
+        }
+        renderPreview();
+      })();
+      previewSettled = update;
+      await update;
     }
   } catch (error) {
     store.status = error.message;
@@ -556,7 +574,7 @@ export function createMap() {
         event.preventDefault();
         return;
       }
-      if (store.tripPicking) {
+      if (store.tripPicking && store.editMode) {
         store.tripStops.push({
           stopId: properties.stop_id,
           offset: store.tripStops.length * 120,
@@ -586,13 +604,14 @@ export function createMap() {
         return;
       }
       if (editTarget(store.activeTab) !== "network") {
-        // On the feed tab the network is context. Only an idle select click
-        // (no pending move, not a placement mode) is a wrong-domain inspect
-        // worth a hint; otherwise it falls through so a stop/shape point —
-        // including a stop being moved — can be dropped onto a road.
-        if (store.mode === "select" && !store.movingStop) {
+        // On the feed tab the network is context. Hint only when the click
+        // hit no feed feature — a stop or shape under the same click must
+        // stay selectable, so never preventDefault here.
+        const feedHit = map.queryRenderedFeatures(event.point, {
+          layers: ["stops", "shapes"],
+        }).length;
+        if (!feedHit && store.mode === "select" && !store.movingStop) {
           store.status = "switch to the OSM tab to inspect the network";
-          event.preventDefault();
         }
         return;
       }
