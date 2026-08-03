@@ -36,3 +36,11 @@ export function sortFeeds(feeds, key, direction) {
 export function isDownloaded(catalogue, feedId) {
   return catalogue.some((entry) => entry.origin === feedId);
 }
+
+// The results that can join a bulk download: downloadable and not already
+// in the catalogue.
+export function selectableFeeds(results, catalogue) {
+  return results.filter(
+    (feed) => feed.downloadable && !isDownloaded(catalogue, feed.id),
+  );
+}

@@ -79,6 +79,8 @@ export const store = reactive({
     sortKey: null,
     sortDir: "asc",
     downloadingId: null,
+    selected: [], // ids picked for a bulk download
+    bulk: { running: false, done: 0, total: 0 },
   },
   status: "",
 });

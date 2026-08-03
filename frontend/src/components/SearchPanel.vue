@@ -1,13 +1,31 @@
 <script setup>
 import { computed, watch } from "vue";
 import { store } from "../store.js";
-import { feedLocation, isDownloaded, safeHttpUrl, sortFeeds } from "../search.js";
+import {
+  feedLocation,
+  isDownloaded,
+  safeHttpUrl,
+  selectableFeeds,
+  sortFeeds,
+} from "../search.js";
 import {
   clearAoi,
   downloadFeed,
+  downloadSelected,
   runSearch,
+  setAllSelected,
   startAoiDraw,
+  toggleFeedSelected,
 } from "../actions.js";
+
+const selectable = computed(() =>
+  selectableFeeds(store.search.results, store.catalogue),
+);
+const allSelected = computed(
+  () =>
+    selectable.value.length > 0 &&
+    selectable.value.every((feed) => store.search.selected.includes(feed.id)),
+);
 
 function drawArea() {
   store.search.aoiMode = "drawn"; // drawing implies searching that area
@@ -97,6 +115,15 @@ function sortArrow(key) {
     <table v-if="store.search.results.length" class="search-table">
       <thead>
         <tr>
+          <th>
+            <input
+              type="checkbox"
+              title="select all downloadable"
+              :checked="allSelected"
+              :disabled="!selectable.length || store.search.bulk.running"
+              @change="setAllSelected(selectable, !allSelected)"
+            />
+          </th>
           <th class="sortable" @click="sortBy('provider')">feed{{ sortArrow("provider") }}</th>
           <th class="sortable" @click="sortBy('location')">location{{ sortArrow("location") }}</th>
           <th class="sortable" @click="sortBy('status')">status{{ sortArrow("status") }}</th>
@@ -105,6 +132,15 @@ function sortArrow(key) {
       </thead>
       <tbody>
         <tr v-for="feed in sortedResults" :key="feed.id">
+          <td>
+            <input
+              v-if="feed.downloadable && !isDownloaded(store.catalogue, feed.id)"
+              type="checkbox"
+              :checked="store.search.selected.includes(feed.id)"
+              :disabled="store.search.bulk.running"
+              @change="toggleFeedSelected(feed.id)"
+            />
+          </td>
           <td>
             <span class="feed-name">{{ feed.provider || feed.id }}</span>
             <span v-if="feed.official" class="official" title="official feed">✓</span>
@@ -139,6 +175,18 @@ function sortArrow(key) {
         </tr>
       </tbody>
     </table>
+    <button
+      v-if="store.search.results.length"
+      class="primary bulk-download"
+      :disabled="!store.search.selected.length || store.search.bulk.running"
+      @click="downloadSelected"
+    >
+      {{
+        store.search.bulk.running
+          ? `Downloading… (${store.search.bulk.done}/${store.search.bulk.total})`
+          : `Download selected (${store.search.selected.length})`
+      }}
+    </button>
     <p v-else-if="store.search.searched && !store.search.searching" class="hint">
       no feeds found.
     </p>

@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   their AOI-cropped copies) land there instead of the transitio cache; the
   folder is created on demand (`directory` on `POST
   /api/catalogue/download`).
+- Bulk download: search results have checkboxes (with a select-all header
+  for everything downloadable) and a "Download selected" button fetches
+  them one by one with the tab's folder and crop settings — progress in
+  the button, a green check per landed feed, and a summary naming any
+  failures without aborting the rest.
 - Search results that are already in the catalogue show a green check
   instead of the Download button (removing the feed from the catalogue
   brings the button back), so it is easy to see which of an area's many

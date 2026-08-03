@@ -548,6 +548,7 @@ export async function runSearch() {
     params.set("limit", String(s.limit));
     const body = await api("GET", `/api/search?${params.toString()}`);
     s.results = body.feeds;
+    s.selected = []; // a new result set invalidates the bulk selection
     s.csvFallback = body.csv_fallback;
     // Don't silently drop a requested area filter.
     store.status =
@@ -567,7 +568,9 @@ function searchAoiBbox() {
   return null;
 }
 
-export async function downloadFeed(feed) {
+// The request body for downloading one feed with the tab's settings, or
+// null (with a status hint) when a requested crop has no area to crop to.
+function downloadBody(feed) {
   const body = { feed_id: feed.id, activate: true };
   const directory = store.search.downloadDir.trim();
   if (directory) body.directory = directory;
@@ -576,10 +579,16 @@ export async function downloadFeed(feed) {
     if (!bbox) {
       // Don't silently download the full feed when a crop was asked for.
       store.status = "select or draw an area to crop to, or uncheck crop";
-      return;
+      return null;
     }
     body.aoi = bbox;
   }
+  return body;
+}
+
+export async function downloadFeed(feed) {
+  const body = downloadBody(feed);
+  if (!body) return;
   store.search.downloadingId = feed.id;
   try {
     await api("POST", "/api/catalogue/download", body);
@@ -593,6 +602,54 @@ export async function downloadFeed(feed) {
     store.status = error.message;
   } finally {
     store.search.downloadingId = null;
+  }
+}
+
+export function toggleFeedSelected(feedId) {
+  const selected = store.search.selected;
+  const index = selected.indexOf(feedId);
+  if (index === -1) selected.push(feedId);
+  else selected.splice(index, 1);
+}
+
+export function setAllSelected(feeds, on) {
+  store.search.selected = on ? feeds.map((feed) => feed.id) : [];
+}
+
+// Download every selected result sequentially, keeping going on failures
+// and reporting a summary; each success gets its green check as it lands.
+export async function downloadSelected() {
+  const s = store.search;
+  if (s.bulk.running || !s.selected.length) return;
+  const queue = s.results.filter((feed) => s.selected.includes(feed.id));
+  if (!queue.length) return;
+  if (queue.length && !downloadBody(queue[0])) return; // crop misconfigured
+  s.bulk = { running: true, done: 0, total: queue.length };
+  const failed = [];
+  try {
+    for (const feed of queue) {
+      const body = downloadBody(feed);
+      if (!body) break; // settings changed mid-run; keep remaining selected
+      s.downloadingId = feed.id;
+      try {
+        await api("POST", "/api/catalogue/download", body);
+        await loadCatalogue();
+        const index = s.selected.indexOf(feed.id);
+        if (index !== -1) s.selected.splice(index, 1);
+      } catch (error) {
+        failed.push(feed.provider || feed.id);
+      } finally {
+        s.downloadingId = null;
+        s.bulk.done += 1;
+      }
+    }
+    await mapBridge.refreshAll(true);
+    const ok = s.bulk.done - failed.length;
+    store.status = failed.length
+      ? `downloaded ${ok} of ${s.bulk.total} feeds — failed: ${failed.join(", ")}`
+      : `downloaded ${ok} feeds`;
+  } finally {
+    s.bulk = { running: false, done: 0, total: 0 };
   }
 }
 
