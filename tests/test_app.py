@@ -671,6 +671,19 @@ def test_catalogue_merge_combines_live_editors(editor, tmp_path):
     ids = {row["stop_id"] for row in rows}
     assert all(":" in stop_id for stop_id in ids)  # namespaced per source feed
 
+    # the merged feed is editable and saveable like any other loaded feed
+    assert (
+        client.patch(
+            f"/api/stops/{rows[0]['stop_id']}", json={"stop_name": "M"}
+        ).status_code
+        == 200
+    )
+    assert client.post("/api/save", json={}).status_code == 422  # no source path
+    saved = client.post(
+        "/api/save", json={"path": str(tmp_path / "merged.zip"), "check": False}
+    )
+    assert saved.status_code == 200 and (tmp_path / "merged.zip").exists()
+
 
 def test_catalogue_merge_names_and_drops(editor, tmp_path):
     import pandas as pd
