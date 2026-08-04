@@ -1,5 +1,7 @@
 import { reactive } from "vue";
 
+import { DEFAULT_BASEMAP } from "./basemaps.js";
+
 // pyrosm tag filters behind the snap-network presets; "streets" uses the
 // server's default network (no filter).
 export const SNAP_FILTERS = {
@@ -10,6 +12,7 @@ export const SNAP_FILTERS = {
 
 export const store = reactive({
   activeTab: "view",
+  basemap: DEFAULT_BASEMAP, // background tile style, switchable on the map
   editMode: false, // the View/Edit tab's switch: map features editable
   tableView: {
     open: false, // attribute table shown below the map

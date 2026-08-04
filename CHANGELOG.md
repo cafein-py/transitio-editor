@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- A switchable background basemap: a floating button on the map offers
+  CartoDB Positron (the new default — its minimal tone keeps the mode
+  colors readable), Voyager, OpenStreetMap and Dark Matter. Every style
+  is a raster layer in the map style, so switching never rebuilds the
+  data overlays, and each carries its provider's attribution.
+
 ## 0.7.0 — 2026-08-04
 
 ### Added

@@ -5,6 +5,7 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 import { api } from "./api.js";
+import { BASEMAPS, basemapLayerId } from "./basemaps.js";
 import { SNAP_FILTERS, store } from "./store.js";
 import { cropShapeFromRing } from "./catalogue.js";
 import { editTarget } from "./network.js";
@@ -55,6 +56,25 @@ export async function previewCoordsSettled() {
     /* the click handler already reported the snap failure */
   }
   return previewCoords;
+}
+
+function syncBasemapLayers() {
+  if (!map || !map.getLayer(basemapLayerId(store.basemap))) return;
+  for (const basemap of BASEMAPS) {
+    map.setLayoutProperty(
+      basemapLayerId(basemap.key),
+      "visibility",
+      basemap.key === store.basemap ? "visible" : "none",
+    );
+  }
+}
+
+export function setBasemap(key) {
+  if (!BASEMAPS.some((basemap) => basemap.key === key)) return;
+  store.basemap = key;
+  // Before the style has built its layers this is a no-op; the load
+  // handler re-syncs, so an early click is not silently lost.
+  syncBasemapLayers();
 }
 
 export function setCursor(kind) {
@@ -443,17 +463,30 @@ async function handleMapClick(event) {
 export function createMap() {
   map = new maplibregl.Map({
     container: "map",
+    // Every basemap is a raster layer in the style; switching toggles
+    // visibility, so the overlays above are never rebuilt (a setStyle
+    // call would drop every custom source and layer).
     style: {
       version: 8,
-      sources: {
-        osm: {
-          type: "raster",
-          tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-          tileSize: 256,
-          attribution: "© OpenStreetMap contributors",
+      sources: Object.fromEntries(
+        BASEMAPS.map((basemap) => [
+          basemapLayerId(basemap.key),
+          {
+            type: "raster",
+            tiles: basemap.tiles,
+            tileSize: 256,
+            attribution: basemap.attribution,
+          },
+        ]),
+      ),
+      layers: BASEMAPS.map((basemap) => ({
+        id: basemapLayerId(basemap.key),
+        type: "raster",
+        source: basemapLayerId(basemap.key),
+        layout: {
+          visibility: basemap.key === store.basemap ? "visible" : "none",
         },
-      },
-      layers: [{ id: "osm", type: "raster", source: "osm" }],
+      })),
     },
     center: [24.94, 60.17],
     zoom: 11,
@@ -461,6 +494,7 @@ export function createMap() {
   map.addControl(new maplibregl.NavigationControl());
 
   map.on("load", async () => {
+    syncBasemapLayers(); // a choice made before the style built lands now
     for (const id of ["stops", "shapes", "network-ways", "network-nodes"]) {
       map.addSource(id, {
         type: "geojson",
