@@ -117,6 +117,83 @@ def _group_name(value):
     return name if _json_safe_name(name) else None
 
 
+def _finite_number(value):
+    """A finite float from a JSON number, or None (bools are not numbers)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        number = float(value)
+    except (OverflowError, ValueError):  # an int beyond the float range
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _crop_ring(ring):
+    """Whether a ring is a usable WGS84 boundary."""
+    if not isinstance(ring, list) or len(ring) < 3:
+        return False
+    points = []
+    for point in ring:
+        if not isinstance(point, (list, tuple)) or len(point) != 2:
+            return False
+        lon, lat = (_finite_number(value) for value in point)
+        if lon is None or lat is None:
+            return False
+        if not -180 <= lon <= 180 or not -90 <= lat <= 90:
+            return False
+        points.append((lon, lat))
+    # Compare the distinct points, in order: a repeated vertex (an extra
+    # click on the same spot, or a ring closed by hand) must not decide
+    # the outcome.
+    distinct = list(dict.fromkeys(points))
+    if len(distinct) < 3:
+        return False
+    # A ring whose points all lie on one line encloses nothing, so
+    # cropping to it would silently produce empty feeds. Anything else is
+    # left to transitio's even-odd test, which is defined for any ring —
+    # a signed area would cancel to zero for a self-intersecting one and
+    # reject it wrongly.
+    (x0, y0), (x1, y1) = distinct[0], distinct[1]
+    return any(
+        abs((x1 - x0) * (y - y0) - (y1 - y0) * (x - x0)) > 0 for x, y in distinct[2:]
+    )
+
+
+def _crop_area(shape):
+    """The AOI a crop request describes, or None when it is malformed.
+
+    Either a GeoJSON Polygon/MultiPolygon mapping (cropped polygon-true
+    by transitio) or a ``[minx, miny, maxx, maxy]`` box. Checked here in
+    full, so a shape that cannot bound an area is a request error rather
+    than a per-feed failure.
+    """
+    if isinstance(shape, dict):
+        kind = shape.get("type")
+        coordinates = shape.get("coordinates")
+        if not isinstance(coordinates, list) or not coordinates:
+            return None
+        parts = [coordinates] if kind == "Polygon" else coordinates
+        if kind not in ("Polygon", "MultiPolygon"):
+            return None
+        for rings in parts:
+            if not isinstance(rings, list) or not rings:
+                return None
+            if not all(_crop_ring(ring) for ring in rings):
+                return None
+        return shape
+    if isinstance(shape, (list, tuple)) and len(shape) == 4:
+        box = tuple(_finite_number(value) for value in shape)
+        if any(value is None for value in box):
+            return None
+        minx, miny, maxx, maxy = box
+        if minx >= maxx or miny >= maxy:
+            return None
+        if not (-180 <= minx and maxx <= 180 and -90 <= miny and maxy <= 90):
+            return None
+        return box
+    return None
+
+
 def _feed_filename(name):
     """A safe ``.zip`` filename from a feed's display name."""
     stem = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-.")[:60]
@@ -962,6 +1039,87 @@ def create_app(
                 **entry_dict(merged, registry),
                 "dropped_files": dropped,
                 "saved": saved,
+            }
+
+    @app.post("/api/catalogue/crop")
+    def catalogue_crop(payload: dict = Body(...)):
+        import tempfile
+
+        from transitio.edit import FeedEditor
+        from transitio.gtfs import crop_feed
+
+        area = _crop_area(payload.get("shape"))
+        if area is None:
+            raise HTTPException(
+                422, "'shape' must be a GeoJSON polygon or [minx, miny, maxx, maxy]"
+            )
+        full_trips_only = payload.get("full_trips_only", False)
+        if not isinstance(full_trips_only, bool):
+            raise HTTPException(422, "'full_trips_only' must be a boolean")
+        feed_ids = payload.get("feed_ids")
+        if feed_ids is not None:
+            if not isinstance(feed_ids, list) or not all(
+                isinstance(feed_id, str) for feed_id in feed_ids
+            ):
+                raise HTTPException(422, "'feed_ids' must be a list of strings")
+            if len(set(feed_ids)) != len(feed_ids):
+                # cropping one feed twice would just cost twice as much
+                raise HTTPException(422, "a feed cannot be cropped twice")
+        group = "Cropped feeds"
+        if payload.get("group") is not None:
+            group = _group_name(payload.get("group"))
+            if group is None:
+                raise HTTPException(422, "'group' must be 1-60 non-blank characters")
+
+        with lock:
+            if feed_ids is None:
+                sources = registry.active_entries()
+            else:
+                sources = []
+                for feed_id in feed_ids:
+                    entry = registry.get(feed_id)
+                    if entry is None:
+                        raise HTTPException(422, f"no feed {feed_id}")
+                    sources.append(entry)
+            if not sources:
+                raise HTTPException(422, "no feeds to crop")
+
+            created, empty, skipped = [], [], []
+            # Serialise and crop under the lock: an edit landing between
+            # reading a feed and writing it out would tear the snapshot.
+            with tempfile.TemporaryDirectory() as scratch:
+                for index, entry in enumerate(sources):
+                    staged = os.path.join(scratch, f"in-{index}.zip")
+                    cropped = os.path.join(scratch, f"out-{index}.zip")
+                    try:
+                        entry.editor.save(staged, check=False)
+                        crop_feed(
+                            staged, cropped, aoi=area, full_trips_only=full_trips_only
+                        )
+                        loaded = FeedEditor(cropped)
+                    except Exception as error:  # noqa: B902
+                        # the area was validated before any work started, so
+                        # what is left is this feed's problem
+                        skipped.append({"name": entry.name, "reason": str(error)})
+                        continue
+                    if not len(loaded.tables.get("stops.txt", ())):
+                        empty.append(entry.name)
+                        continue
+                    # pair each result with its source: names repeat, so
+                    # they cannot be used to match them up afterwards
+                    created.append((entry, loaded))
+
+            if created and not registry.has_group(group):
+                registry.add_group(group)
+            entries = [
+                registry.add(loaded, f"{source.name} (cropped)", group=group)
+                for source, loaded in created
+            ]
+            return {
+                "feeds": [entry_dict(entry, registry) for entry in entries],
+                "empty": empty,
+                "skipped": skipped,
+                "groups": registry.groups(),
             }
 
     @app.put("/api/catalogue/current")

@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Cropping the feeds on the map to a drawn area: in the View/Edit tab's
+  editing mode, drag a box or click out a polygon, then confirm in the
+  panel below the map. Every feed shown on the map is cropped to the area
+  — over the loaded editors, so unsaved edits are included — and each
+  result is added as a copy named ``<name> (cropped)`` in a group
+  (``Cropped feeds`` by default, renameable like any group). The
+  originals are untouched, and feeds with no service in the area are
+  reported rather than added. Polygons crop to the polygon itself, not
+  its bounding box (``POST /api/catalogue/crop``, over transitio 0.6's
+  ``crop_feed``).
+
 - Feed groups in the Data tab: name a group, then drag feeds into and out
   of it. Groups are display-only — they do not change which feed is
   current, which are active or how the map draws — and removing a group

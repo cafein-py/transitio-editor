@@ -2,7 +2,12 @@
 // and/or calls the API, then refreshes the map. `wrap` funnels errors to
 // the status line and marks the validation report stale.
 import { api } from "./api.js";
-import { mergeStatus, moveFeedToGroup } from "./catalogue.js";
+import {
+  cropRequestBody,
+  cropStatus,
+  mergeStatus,
+  moveFeedToGroup,
+} from "./catalogue.js";
 import * as mapBridge from "./map.js";
 import { MODES, UNKNOWN_MODE } from "./modes.js";
 import { isDownloaded } from "./search.js";
@@ -730,6 +735,27 @@ export async function removeFeed(feed) {
     await mapBridge.refreshAll(false);
   } catch (error) {
     store.status = error.message;
+  }
+}
+
+// Cropping the feeds on the map to the drawn area. The shape is drawn
+// first and confirmed here, so an accidental double-click cannot start a
+// long operation and the options can be set before it runs.
+export async function cropToShape() {
+  const body = cropRequestBody(store.cropShape, store.crop);
+  if (!body || store.crop.running) return;
+  store.crop.running = true;
+  try {
+    const result = await api("POST", "/api/catalogue/crop", body);
+    mapBridge.cancelCropDraw(); // clears the shape and the drawing state
+    await loadCatalogue();
+    await mapBridge.refreshAll(false);
+    await mapBridge.refreshSummary();
+    store.status = cropStatus(result);
+  } catch (error) {
+    store.status = error.message;
+  } finally {
+    store.crop.running = false;
   }
 }
 

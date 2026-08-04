@@ -6,6 +6,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 
 import { api } from "./api.js";
 import { SNAP_FILTERS, store } from "./store.js";
+import { cropShapeFromRing } from "./catalogue.js";
 import { editTarget } from "./network.js";
 import {
   MODES,
@@ -67,7 +68,7 @@ export function setCursor(kind) {
 // MapLibre reports unwrapped longitudes on rendered world copies (e.g. 384°);
 // normalize to [-180, 180] so the backend's range check accepts them.
 function wrapLng(lng) {
-  return (((lng + 180) % 360) + 360) % 360 - 180;
+  return ((((lng + 180) % 360) + 360) % 360) - 180;
 }
 
 const clampLat = (value) => Math.max(-90, Math.min(90, value));
@@ -154,6 +155,125 @@ export function clearAoi() {
     setCursor("");
   }
   renderAoi(null);
+}
+
+// The crop area being drawn or finished: a box drag or a click-built
+// polygon. Kept apart from store.aoi (the search box) so the two tools
+// cannot overwrite each other.
+let cropVertices = []; // [lng, lat] of a polygon under construction
+let cropBoxStart = null;
+// A box drag ends with a click event; it must not reach select or an
+// armed add-stop/shape mode — including the layer handlers, which run
+// before the general one.
+let swallowClickAfterCrop = false;
+
+function croppingClick() {
+  return Boolean(store.cropDrawing) || swallowClickAfterCrop;
+}
+
+function cropFeatures(ring, closed) {
+  const features = ring.map((coord) => ({
+    type: "Feature",
+    geometry: { type: "Point", coordinates: coord },
+    properties: {},
+  }));
+  if (ring.length >= 2) {
+    features.push({
+      type: "Feature",
+      geometry: closed
+        ? { type: "Polygon", coordinates: [[...ring, ring[0]]] }
+        : { type: "LineString", coordinates: ring },
+      properties: {},
+    });
+  }
+  return { type: "FeatureCollection", features };
+}
+
+function renderCrop(ring, closed) {
+  const source = map && map.getSource("crop");
+  if (!source) return;
+  source.setData(
+    ring && ring.length
+      ? cropFeatures(ring, closed)
+      : { type: "FeatureCollection", features: [] },
+  );
+}
+
+function boxRing(box) {
+  const [minx, miny, maxx, maxy] = box;
+  return [
+    [minx, miny],
+    [maxx, miny],
+    [maxx, maxy],
+    [minx, maxy],
+  ];
+}
+
+// Finished shapes are stored as the GeoJSON the crop endpoint takes.
+function finishCropPolygon(ring) {
+  const { shape, error } = cropShapeFromRing(
+    ring.map(([lng, lat]) => [lng, clampLat(lat)]),
+  );
+  if (error) {
+    store.status = error;
+    cancelCropDraw();
+    return;
+  }
+  store.cropShape = shape;
+  store.cropDrawing = null;
+  renderCrop(ring, true);
+}
+
+export function startCropDraw(kind) {
+  if (!map) return;
+  cropVertices = [];
+  cropBoxStart = null;
+  store.cropShape = null;
+  store.cropDrawing = kind; // "box" | "polygon"
+  if (kind === "box") map.dragPan.disable();
+  setCursor("crosshair");
+  renderCrop([], false);
+}
+
+export function cancelCropDraw() {
+  cropVertices = [];
+  cropBoxStart = null;
+  store.cropDrawing = null;
+  store.cropShape = null;
+  if (map) {
+    map.dragPan.enable();
+    setCursor("");
+  }
+  renderCrop([], false);
+}
+
+// Enough vertices to bound an area; a closing click on the first vertex
+// or Enter finishes the polygon.
+export function closeCropPolygon() {
+  if (store.cropDrawing !== "polygon" || cropVertices.length < 3) return false;
+  const ring = cropVertices;
+  cropVertices = [];
+  if (map) {
+    map.dragPan.enable();
+    setCursor("");
+  }
+  finishCropPolygon(ring);
+  return true;
+}
+
+function addCropVertex(lngLat) {
+  const point = [lngLat.lng, lngLat.lat];
+  if (cropVertices.length >= 3) {
+    const [firstLng, firstLat] = cropVertices[0];
+    const start = map.project({ lng: firstLng, lat: firstLat });
+    const here = map.project(lngLat);
+    if (Math.hypot(start.x - here.x, start.y - here.y) < 12) {
+      closeCropPolygon(); // clicked back on the first vertex
+      return;
+    }
+  }
+  cropVertices = [...cropVertices, point];
+  renderCrop(cropVertices, false);
 }
 
 function renderPreview() {
@@ -349,7 +469,10 @@ export function createMap() {
     }
     map.addSource("preview", {
       type: "geojson",
-      data: { type: "Feature", geometry: { type: "LineString", coordinates: [] } },
+      data: {
+        type: "Feature",
+        geometry: { type: "LineString", coordinates: [] },
+      },
     });
     map.addSource("aoi", {
       type: "geojson",
@@ -367,7 +490,40 @@ export function createMap() {
       id: "aoi-outline",
       type: "line",
       source: "aoi",
-      paint: { "line-color": "#1a9", "line-width": 2, "line-dasharray": [2, 1] },
+      paint: {
+        "line-color": "#1a9",
+        "line-width": 2,
+        "line-dasharray": [2, 1],
+      },
+    });
+    map.addSource("crop", {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+    // The crop area reads as an edit, not a search: amber, above the AOI.
+    map.addLayer({
+      id: "crop-fill",
+      type: "fill",
+      source: "crop",
+      paint: { "fill-color": "#f0a", "fill-opacity": 0.1 },
+    });
+    map.addLayer({
+      id: "crop-outline",
+      type: "line",
+      source: "crop",
+      paint: { "line-color": "#c07", "line-width": 2 },
+    });
+    map.addLayer({
+      id: "crop-vertices",
+      type: "circle",
+      source: "crop",
+      filter: ["==", ["geometry-type"], "Point"],
+      paint: {
+        "circle-radius": 4,
+        "circle-color": "#fff",
+        "circle-stroke-color": "#c07",
+        "circle-stroke-width": 2,
+      },
     });
     // OSM network under the GTFS layers: ways always, nodes only when zoomed
     // in (a whole-city node layer is too dense otherwise).
@@ -376,7 +532,11 @@ export function createMap() {
       type: "line",
       source: "network-ways",
       layout: { visibility: "none" },
-      paint: { "line-color": "#7a4fbf", "line-width": 1.5, "line-opacity": 0.6 },
+      paint: {
+        "line-color": "#7a4fbf",
+        "line-width": 1.5,
+        "line-opacity": 0.6,
+      },
     });
     map.addLayer({
       id: "network-nodes",
@@ -418,17 +578,28 @@ export function createMap() {
       id: "preview",
       type: "line",
       source: "preview",
-      paint: { "line-color": "#c0392b", "line-width": 3, "line-dasharray": [2, 1] },
+      paint: {
+        "line-color": "#c0392b",
+        "line-width": 3,
+        "line-dasharray": [2, 1],
+      },
     });
     map.addSource("network-preview", {
       type: "geojson",
-      data: { type: "Feature", geometry: { type: "LineString", coordinates: [] } },
+      data: {
+        type: "Feature",
+        geometry: { type: "LineString", coordinates: [] },
+      },
     });
     map.addLayer({
       id: "network-preview",
       type: "line",
       source: "network-preview",
-      paint: { "line-color": "#7a4fbf", "line-width": 3, "line-dasharray": [2, 1] },
+      paint: {
+        "line-color": "#7a4fbf",
+        "line-width": 3,
+        "line-dasharray": [2, 1],
+      },
     });
     map.addLayer({
       id: "shapes-highlight",
@@ -549,7 +720,7 @@ export function createMap() {
     );
 
     map.on("click", "stops", (event) => {
-      if (store.aoiDrawing) return; // a rectangle gesture, not a selection
+      if (store.aoiDrawing || croppingClick()) return; // a drawing gesture
       if (store.movingStop || store.mode !== "select") return;
       // While editing the OSM network, stops are context: ignore them
       // silently (no preventDefault) so a network feature under the same
@@ -572,7 +743,8 @@ export function createMap() {
         properties.feed_id !== store.currentFeedId
       ) {
         // Editing targets the current feed; viewing may select any feed.
-        store.status = "that stop belongs to another feed; make it current to edit it";
+        store.status =
+          "that stop belongs to another feed; make it current to edit it";
         event.preventDefault();
         return;
       }
@@ -594,7 +766,7 @@ export function createMap() {
     // One handler over both network layers: two separate listeners would
     // both fire where a node sits on its way and race to set the selection.
     map.on("click", ["network-nodes", "network-ways"], (event) => {
-      if (event.defaultPrevented || store.aoiDrawing) return;
+      if (event.defaultPrevented || store.aoiDrawing || croppingClick()) return;
       // In add-node/move-node/draw-way mode a click on a road/node is a
       // placement, not a selection: fall through to the general handler.
       if (
@@ -651,7 +823,12 @@ export function createMap() {
       const skip = new Set(["feed_color"]);
       let rows = 0;
       for (const [key, value] of Object.entries(properties)) {
-        if (skip.has(key) || value === null || value === undefined || value === "")
+        if (
+          skip.has(key) ||
+          value === null ||
+          value === undefined ||
+          value === ""
+        )
           continue;
         if (rows >= 8) break;
         const tr = document.createElement("tr");
@@ -674,7 +851,9 @@ export function createMap() {
         title = `stop ${properties.stop_id ?? ""}`;
       } else {
         title = `shape ${properties.shape_id ?? ""}`;
-        const mode = MODES.find((entry) => entry.code === properties.route_type);
+        const mode = MODES.find(
+          (entry) => entry.code === properties.route_type,
+        );
         if (mode) {
           properties.mode = mode.label;
           delete properties.route_type;
@@ -705,7 +884,7 @@ export function createMap() {
     // and halos the line; closing the card clears the halo.
     pinnedPopup.on("close", () => setSelectedShape(null));
     map.on("click", "shapes", (event) => {
-      if (event.defaultPrevented || store.aoiDrawing) return;
+      if (event.defaultPrevented || store.aoiDrawing || croppingClick()) return;
       if (store.activeTab !== "view") return;
       if (store.mode !== "select" || store.movingStop) return;
       hoverPopup.remove();
@@ -718,13 +897,58 @@ export function createMap() {
     });
 
     map.on("click", (event) => {
-      if (event.defaultPrevented || store.aoiDrawing) return;
+      if (swallowClickAfterCrop) {
+        swallowClickAfterCrop = false; // the tail of a box drag
+        return;
+      }
+      if (store.cropDrawing === "polygon") {
+        addCropVertex(event.lngLat); // building the crop area, not editing
+        return;
+      }
+      if (event.defaultPrevented || store.aoiDrawing || croppingClick()) return;
       if (editTarget(store.activeTab) === "network") {
         handleNetworkClick(event);
       } else if (store.activeTab === "view" && store.editMode) {
         // Feed mutations only with the editing switch on: an armed mode
         // (add stop, draw) must not fire while just viewing.
         handleMapClick(event);
+      }
+    });
+
+    // Enter finishes a polygon, Escape abandons the whole drawing.
+    window.addEventListener("keydown", (event) => {
+      if (!store.cropDrawing) return;
+      if (event.key === "Enter") closeCropPolygon();
+      else if (event.key === "Escape") cancelCropDraw();
+    });
+
+    // Crop-area drawing: a box drag, or clicks building a polygon.
+    map.on("mousedown", (event) => {
+      if (store.cropDrawing !== "box") return;
+      cropBoxStart = event.lngLat;
+      event.preventDefault();
+    });
+    map.on("mousemove", (event) => {
+      if (store.cropDrawing !== "box" || !cropBoxStart) return;
+      const box = aoiBox(cropBoxStart, event.lngLat);
+      if (box) renderCrop(boxRing(box), true);
+    });
+    map.on("mouseup", (event) => {
+      if (store.cropDrawing !== "box" || !cropBoxStart) return;
+      const box = aoiBox(cropBoxStart, event.lngLat);
+      cropBoxStart = null;
+      map.dragPan.enable();
+      setCursor("");
+      // MapLibre fires the click for a within-tolerance gesture in this
+      // same task; clearing on the next tick swallows exactly that one.
+      swallowClickAfterCrop = true;
+      setTimeout(() => {
+        swallowClickAfterCrop = false;
+      }, 0);
+      if (!box || box[2] - box[0] < 1e-9 || box[3] - box[1] < 1e-9) {
+        cancelCropDraw(); // a click, not a box
+      } else {
+        finishCropPolygon(boxRing(box));
       }
     });
 
@@ -876,7 +1100,12 @@ function setGroupVisible(layers, visible) {
 
 export function setNetworkVisible(visible) {
   setGroupVisible(
-    ["network-ways", "network-nodes", "network-ways-selected", "network-nodes-selected"],
+    [
+      "network-ways",
+      "network-nodes",
+      "network-ways-selected",
+      "network-nodes-selected",
+    ],
     visible,
   );
 }
