@@ -23,10 +23,16 @@ export function feedModes(modes) {
   return MODES.filter((mode) => modes.includes(mode.code));
 }
 
-// The tab to open on startup: launched with a feed, the editor starts on
-// the data; launched empty, it starts where feeds are found.
+// Whether an entry holds an actual feed: a launch without one still
+// registers an empty builder to build a feed from scratch on.
+function hasFeedContent(feed) {
+  return Boolean(feed.source) || Object.keys(feed.tables || {}).length > 0;
+}
+
+// The tab to open on startup: with a feed loaded the editor starts on the
+// data; with nothing to show it starts where feeds are found.
 export function initialTab(catalogue) {
-  return catalogue && catalogue.length ? "view" : "search";
+  return (catalogue || []).some(hasFeedContent) ? "view" : "search";
 }
 
 // The status line after a merge: where it went (when saved) and any files

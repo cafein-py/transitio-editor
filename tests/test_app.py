@@ -800,6 +800,15 @@ def test_catalogue_rejects_malformed_inputs(editor):
     )  # not silently truthy
 
 
+def test_scratch_builder_entry_carries_no_feed_content():
+    # A launch without a feed opens on an empty builder; the GUI reads this
+    # entry's empty source and tables to know it has nothing to show yet.
+    client = TestClient(create_app(FeedBuilder()))
+    entry = client.get("/api/catalogue").json()["feeds"][0]
+    assert entry["source"] is None
+    assert entry["tables"] == {}
+
+
 def test_no_feed_loaded_returns_409(tmp_path):
     client = TestClient(create_app())  # empty registry
     assert client.get("/api/feed").json()["currentFeedId"] is None
