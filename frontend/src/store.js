@@ -30,6 +30,14 @@ export const store = reactive({
   draggingFeedId: null, // feed being dragged between groups
   currentFeedId: null,
   newFeedPath: "",
+  // The crop tool on the View/Edit tab: a drawn area plus its options.
+  cropDrawing: null, // "box" | "polygon" while drawing, else null
+  cropShape: null, // the finished GeoJSON Polygon, or null
+  crop: {
+    group: "Cropped feeds", // destination group for the copies
+    fullTripsOnly: false, // keep only trips entirely inside the area
+    running: false,
+  },
   merge: {
     selected: [], // feed ids ticked for merging
     name: "", // optional name for the merged feed

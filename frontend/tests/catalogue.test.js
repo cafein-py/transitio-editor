@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  cropRequestBody,
+  cropShapeFromRing,
+  cropStatus,
   currentFeed,
   feedModes,
   feedTableSummary,
@@ -136,5 +139,87 @@ describe("moveFeedToGroup", () => {
     expect(moveFeedToGroup(feed, "One")).toBeNull();
     expect(moveFeedToGroup({ feed_id: "b", group: null }, null)).toBeNull();
     expect(moveFeedToGroup(undefined, "One")).toBeNull();
+  });
+});
+
+describe("cropRequestBody", () => {
+  const shape = { type: "Polygon", coordinates: [[]] };
+
+  it("carries the shape and the tab's options", () => {
+    expect(
+      cropRequestBody(shape, { group: " Cropped feeds ", fullTripsOnly: true }),
+    ).toEqual({ shape, full_trips_only: true, group: "Cropped feeds" });
+    // a blank group leaves the server's default in place
+    expect(cropRequestBody(shape, { group: "  " })).toEqual({
+      shape,
+      full_trips_only: false,
+    });
+  });
+
+  it("is nothing without a drawn shape", () => {
+    expect(cropRequestBody(null, { group: "x" })).toBeNull();
+  });
+});
+
+describe("cropStatus", () => {
+  it("reports created, empty and failed feeds separately", () => {
+    expect(cropStatus({ feeds: [{}, {}], empty: [], skipped: [] })).toBe(
+      "cropped 2 feeds",
+    );
+    expect(cropStatus({ feeds: [{}], empty: ["Far"], skipped: [] })).toBe(
+      "cropped 1 feed — Far came back empty",
+    );
+    expect(
+      cropStatus({
+        feeds: [],
+        empty: [],
+        skipped: [{ name: "Broken", reason: "bad zip" }],
+      }),
+    ).toBe("nothing cropped — failed: Broken (bad zip)");
+    expect(cropStatus({})).toBe("nothing cropped");
+  });
+});
+
+describe("cropShapeFromRing", () => {
+  const helsinki = [
+    [24.9, 60.1],
+    [25.0, 60.1],
+    [25.0, 60.2],
+    [24.9, 60.2],
+  ];
+
+  it("closes an ordinary ring untouched", () => {
+    const { shape, error } = cropShapeFromRing(helsinki);
+    expect(error).toBeUndefined();
+    expect(shape.type).toBe("Polygon");
+    // closed, and the eastern longitudes are left where they were
+    expect(shape.coordinates[0]).toHaveLength(5);
+    expect(shape.coordinates[0][0]).toEqual([24.9, 60.1]);
+    expect(shape.coordinates[0][4]).toEqual([24.9, 60.1]);
+  });
+
+  it("shifts a ring drawn on another world copy back as a whole", () => {
+    // the same area on MapLibre's next copy of the world
+    const { shape } = cropShapeFromRing(
+      helsinki.map(([lng, lat]) => [lng + 360, lat]),
+    );
+    shape.coordinates[0].slice(0, 4).forEach(([lng, lat], index) => {
+      expect(lng).toBeCloseTo(helsinki[index][0], 9);
+      expect(lat).toBe(helsinki[index][1]);
+    });
+  });
+
+  it("refuses areas it cannot express", () => {
+    // MapLibre reports a drag across the antimeridian continuously, so
+    // the ring runs past 180 rather than wrapping
+    expect(
+      cropShapeFromRing([
+        [179.5, 10],
+        [180.5, 10],
+        [180.5, 11],
+      ]).error,
+    ).toMatch(/antimeridian/);
+    expect(cropShapeFromRing([[0, 0]]).error).toMatch(/three corners/);
+    expect(cropShapeFromRing(null).error).toMatch(/three corners/);
   });
 });

@@ -13,6 +13,7 @@ import {
 import AgencyServiceForm from "./components/AgencyServiceForm.vue";
 import AttributeTable from "./components/AttributeTable.vue";
 import CataloguePanel from "./components/CataloguePanel.vue";
+import CropPanel from "./components/CropPanel.vue";
 import CurrentFeedBar from "./components/CurrentFeedBar.vue";
 import NetworkPanel from "./components/NetworkPanel.vue";
 import SearchPanel from "./components/SearchPanel.vue";
@@ -55,6 +56,7 @@ onMounted(async () => {
         editing mode
       </label>
       <FeedSummary />
+      <CropPanel />
       <RouteLegend />
       <StopInspector />
       <template v-if="store.editMode">

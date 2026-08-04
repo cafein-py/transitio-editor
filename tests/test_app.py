@@ -894,6 +894,186 @@ def test_catalogue_group_errors(editor):
     )
 
 
+def _write_feed_at(path, stops):
+    """A feed with one two-stop trip per given stop id."""
+    b = FeedBuilder()
+    b.add_agency("a", "A", "https://a.example", "Europe/Helsinki")
+    b.add_route("r", 3, "1", agency_id="a")
+    b.add_service("wk", "weekdays", "20260101", "20261231")
+    for stop_id, lat, lon in stops:
+        b.add_stop(stop_id, stop_id, lat, lon)
+        b.add_trip(
+            "r",
+            "wk",
+            f"t-{stop_id}",
+            [(stop_id, "08:00:00", "08:00:00"), (stop_id, "08:05:00", "08:05:00")],
+        )
+    b.save(path, check=False)
+    return path
+
+
+INSIDE = (60.12, 24.93)
+OUTSIDE = (61.5, 27.0)
+CITY_BOX = [24.9, 60.1, 25.0, 60.2]
+CITY_POLYGON = {
+    "type": "Polygon",
+    # a triangle covering the western half of CITY_BOX only
+    "coordinates": [[[24.90, 60.10], [24.95, 60.10], [24.90, 60.20], [24.90, 60.10]]],
+}
+
+
+def test_crop_creates_copies_in_a_group(tmp_path):
+    source = _write_feed_at(
+        tmp_path / "city.zip", [("in1", *INSIDE), ("out1", *OUTSIDE)]
+    )
+    client = TestClient(create_app(FeedEditor(source)))
+    other = _write_feed_at(tmp_path / "far.zip", [("z1", *OUTSIDE)])
+    client.post("/api/catalogue", json={"path": str(other), "name": "Far"})
+
+    body = client.post("/api/catalogue/crop", json={"shape": CITY_BOX}).json()
+    # the feed with nothing inside is reported, not created
+    assert body["empty"] == ["Far"]
+    assert body["skipped"] == []
+    assert len(body["feeds"]) == 1
+    cropped = body["feeds"][0]
+    assert cropped["name"] == "city.zip (cropped)"
+    assert cropped["group"] == "Cropped feeds"
+    assert cropped["source"] is None  # a copy, saved wherever the user says
+    assert cropped["tables"]["stops.txt"] == 1  # only the inside stop
+    assert body["groups"] == ["Cropped feeds"]
+
+    # the sources are untouched
+    feeds = client.get("/api/catalogue").json()["feeds"]
+    assert feeds[0]["tables"]["stops.txt"] == 2
+    assert len(feeds) == 3
+
+
+def test_crop_uses_live_edits_and_polygon_shape(tmp_path):
+    # in1 is inside the triangle; in2 is in its bounding box but outside
+    # the triangle itself
+    source = _write_feed_at(
+        tmp_path / "city.zip", [("in1", *INSIDE), ("in2", 60.17, 24.98)]
+    )
+    client = TestClient(create_app(FeedEditor(source)))
+    assert (
+        client.patch("/api/stops/in1", json={"stop_name": "Renamed"}).status_code == 200
+    )
+
+    # the triangle covers in1 (24.93) but not in2 (24.98), unlike the box
+    body = client.post(
+        "/api/catalogue/crop", json={"shape": CITY_POLYGON, "group": "West"}
+    ).json()
+    assert body["feeds"][0]["tables"]["stops.txt"] == 1
+    assert body["feeds"][0]["group"] == "West"
+    client.put("/api/catalogue/current", json={"feed_id": body["feeds"][0]["feed_id"]})
+    rows = client.get("/api/tables/stops.txt").json()["rows"]
+    assert [row["stop_name"] for row in rows] == ["Renamed"]  # unsaved edit kept
+
+    box = client.post("/api/catalogue/crop", json={"shape": CITY_BOX}).json()
+    # the same box keeps both stops: the polygon was not its bounding box
+    assert box["feeds"][0]["tables"]["stops.txt"] >= 2
+
+
+def test_crop_selected_feeds_and_full_trips_only(tmp_path):
+    source = _write_feed_at(
+        tmp_path / "city.zip", [("in1", *INSIDE), ("out1", *OUTSIDE)]
+    )
+    client = TestClient(create_app(FeedEditor(source)))
+
+    # one trip crossing the boundary: kept whole by default, dropped when
+    # only wholly-inside trips count
+    crossing = FeedBuilder()
+    crossing.add_agency("a", "A", "https://a.example", "Europe/Helsinki")
+    crossing.add_stop("here", "here", *INSIDE)
+    crossing.add_stop("away", "away", *OUTSIDE)
+    crossing.add_route("r", 3, "1", agency_id="a")
+    crossing.add_service("wk", "weekdays", "20260101", "20261231")
+    crossing.add_trip(
+        "r",
+        "wk",
+        "t-cross",
+        [("here", "08:00:00", "08:00:00"), ("away", "09:00:00", "09:00:00")],
+    )
+    path = tmp_path / "crossing.zip"
+    crossing.save(path, check=False)
+    second = client.post("/api/catalogue", json={"path": str(path)}).json()
+
+    only = client.post(
+        "/api/catalogue/crop",
+        json={"shape": CITY_BOX, "feed_ids": [second["feed_id"]]},
+    ).json()
+    # only the named feed was cropped, and the crossing trip survived whole
+    assert [feed["name"] for feed in only["feeds"]] == ["crossing.zip (cropped)"]
+    assert only["feeds"][0]["tables"]["stops.txt"] == 2  # the outside stop too
+
+    strict = client.post(
+        "/api/catalogue/crop",
+        json={
+            "shape": CITY_BOX,
+            "feed_ids": [second["feed_id"]],
+            "full_trips_only": True,
+        },
+    ).json()
+    # the only trip leaves the area, so nothing is left to crop
+    assert strict["feeds"] == []
+    assert strict["empty"] == ["crossing.zip"]
+
+
+def test_crop_accepts_a_ring_with_a_repeated_vertex(tmp_path):
+    source = _write_feed_at(tmp_path / "city.zip", [("in1", *INSIDE)])
+    client = TestClient(create_app(FeedEditor(source)))
+    # an extra click on the same spot must not make the area degenerate
+    doubled = {
+        "type": "Polygon",
+        "coordinates": [
+            [
+                [24.90, 60.10],
+                [24.90, 60.10],
+                [25.00, 60.10],
+                [25.00, 60.20],
+                [24.90, 60.10],
+            ]
+        ],
+    }
+    body = client.post("/api/catalogue/crop", json={"shape": doubled})
+    assert body.status_code == 200
+    assert len(body.json()["feeds"]) == 1
+
+
+def test_crop_rejects_bad_requests(tmp_path):
+    source = _write_feed_at(tmp_path / "city.zip", [("in1", *INSIDE)])
+    client = TestClient(create_app(FeedEditor(source)))
+    for body in (
+        {},
+        {"shape": None},
+        {"shape": "everywhere"},
+        {"shape": [1, 2, 3]},
+        {"shape": [1, 2, "east", 4]},
+        {"shape": [25.0, 60.2, 24.9, 60.1]},  # reversed
+        {"shape": {"type": "Point", "coordinates": [0, 0]}},
+        {"shape": CITY_BOX, "feed_ids": ["nope"]},
+        {"shape": CITY_BOX, "feed_ids": "feed-1"},
+        {"shape": CITY_BOX, "feed_ids": ["feed-1", "feed-1"]},
+        {"shape": CITY_BOX, "full_trips_only": "yes"},
+        {"shape": [10**400, 60.1, 25.0, 60.2]},  # beyond the float range
+        {"shape": [True, 60.1, 25.0, 60.2]},  # a bool is not a coordinate
+        {"shape": [24.9, 60.1, 200.0, 60.2]},  # outside WGS84
+        {"shape": CITY_BOX, "group": "x" * 61},
+        # structurally fine but bounding no area
+        {
+            "shape": {
+                "type": "Polygon",
+                "coordinates": [[[24.9, 60.1], [25.0, 60.1], [25.1, 60.1]]],
+            }
+        },
+        {"shape": {"type": "MultiPolygon", "coordinates": [[]]}},
+        {"shape": CITY_BOX, "group": "  "},
+        # a polygon that cannot bound an area
+        {"shape": {"type": "Polygon", "coordinates": [[[0, 0], [1, 1]]]}},
+    ):
+        assert client.post("/api/catalogue/crop", json=body).status_code == 422, body
+
+
 def test_catalogue_rejects_malformed_inputs(editor):
     client = TestClient(create_app(editor))
     assert client.post("/api/catalogue", json={"path": ["a", "b"]}).status_code == 422
