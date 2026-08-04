@@ -23,6 +23,12 @@ export function feedModes(modes) {
   return MODES.filter((mode) => modes.includes(mode.code));
 }
 
+// The tab to open on startup: launched with a feed, the editor starts on
+// the data; launched empty, it starts where feeds are found.
+export function initialTab(catalogue) {
+  return catalogue && catalogue.length ? "view" : "search";
+}
+
 // The status line after a merge; files the merge could not carry over
 // are named so the loss is visible.
 export function mergeStatus(name, droppedFiles) {

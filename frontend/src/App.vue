@@ -2,6 +2,7 @@
 import { onMounted } from "vue";
 
 import { store } from "./store.js";
+import { initialTab } from "./catalogue.js";
 import { createMap } from "./map.js";
 import {
   checkNetworkAvailable,
@@ -26,9 +27,11 @@ import TimetablePanel from "./components/TimetablePanel.vue";
 import TripForm from "./components/TripForm.vue";
 import ValidationReport from "./components/ValidationReport.vue";
 
-onMounted(() => {
+onMounted(async () => {
   createMap();
-  loadCatalogue();
+  await loadCatalogue();
+  // Only on startup: later removing every feed must not move the user.
+  store.activeTab = initialTab(store.catalogue);
   checkNetworkAvailable();
 });
 </script>

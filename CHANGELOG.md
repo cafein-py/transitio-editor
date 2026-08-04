@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+
+- The editor opens on the Search tab when it was launched without a feed,
+  and on View/Edit when a feed was given; removing feeds later never moves
+  the user off the tab they are on.
+
 ### Added
 
 - Merging feeds from the Data tab: tick two or more catalogue entries and

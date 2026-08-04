@@ -4,6 +4,7 @@ import {
   currentFeed,
   feedModes,
   feedTableSummary,
+  initialTab,
   mergeStatus,
 } from "../src/catalogue.js";
 
@@ -35,6 +36,14 @@ describe("currentFeed", () => {
     expect(currentFeed(catalogue, "feed-9")).toBeNull();
     expect(currentFeed(catalogue, null)).toBeNull();
     expect(currentFeed([], "feed-1")).toBeNull();
+  });
+});
+
+describe("initialTab", () => {
+  it("starts on the data when a feed was loaded, else on Search", () => {
+    expect(initialTab([{ feed_id: "feed-1" }])).toBe("view");
+    expect(initialTab([])).toBe("search");
+    expect(initialTab(undefined)).toBe("search");
   });
 });
 
