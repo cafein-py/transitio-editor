@@ -2179,9 +2179,11 @@ def test_fs_dirs_skips_names_that_are_not_utf8(editor, tmp_path):
     # response; the listing skips it. Only filesystems that accept such a
     # name (Linux, not macOS or Windows) can exercise this.
     try:
+        # Windows decodes filesystem bytes strictly, so even naming the
+        # entry raises there; POSIX filesystems may still refuse it.
         os.mkdir(os.path.join(root, os.fsdecode(b"bad\xff")))
-    except OSError:
-        pytest.skip("filesystem requires valid UTF-8 names")
+    except (OSError, ValueError):
+        pytest.skip("this platform has no non-UTF-8 filenames")
     body = client.get("/api/fs/dirs", params={"path": str(root)})
     assert body.status_code == 200
     assert body.json()["dirs"] == ["fine"]
