@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { feedLocation, isDownloaded, safeHttpUrl, selectableFeeds, sortFeeds } from "../src/search.js";
+import {
+  feedLocation,
+  isDownloaded,
+  safeHttpUrl,
+  selectableFeeds,
+  sortFeeds,
+} from "../src/search.js";
 
 const feed = (provider, locations, status = "active") => ({
   id: provider.toLowerCase(),
@@ -31,7 +37,9 @@ describe("feedLocation", () => {
   it("falls back to a dash when nothing is known", () => {
     expect(feedLocation({ locations: [] })).toBe("—");
     expect(feedLocation({})).toBe("—");
-    expect(feedLocation({ locations: [{ municipality: null, country: "" }] })).toBe("—");
+    expect(
+      feedLocation({ locations: [{ municipality: null, country: "" }] }),
+    ).toBe("—");
   });
 });
 
@@ -56,10 +64,9 @@ describe("sortFeeds", () => {
       "Alpha",
       "Zebra",
     ]);
-    expect(sortFeeds(feeds, "provider", "desc").map((f) => f.provider)).toEqual([
-      "Zebra",
-      "Alpha",
-    ]);
+    expect(sortFeeds(feeds, "provider", "desc").map((f) => f.provider)).toEqual(
+      ["Zebra", "Alpha"],
+    );
     expect(feeds[0].provider).toBe("Zebra"); // original order intact
   });
 

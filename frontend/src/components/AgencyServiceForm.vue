@@ -7,9 +7,17 @@ import { submitAgency, submitService } from "../actions.js";
   <details class="panel">
     <summary>New agency / service</summary>
     <form @submit.prevent="submitAgency">
-      <input v-model="forms.agency.agency_id" placeholder="agency_id" required />
+      <input
+        v-model="forms.agency.agency_id"
+        placeholder="agency_id"
+        required
+      />
       <input v-model="forms.agency.agency_name" placeholder="name" required />
-      <input v-model="forms.agency.agency_url" placeholder="https://…" required />
+      <input
+        v-model="forms.agency.agency_url"
+        placeholder="https://…"
+        required
+      />
       <input
         v-model="forms.agency.agency_timezone"
         placeholder="Europe/Helsinki"
@@ -18,7 +26,11 @@ import { submitAgency, submitService } from "../actions.js";
       <button>Add agency</button>
     </form>
     <form @submit.prevent="submitService">
-      <input v-model="forms.service.service_id" placeholder="service_id" required />
+      <input
+        v-model="forms.service.service_id"
+        placeholder="service_id"
+        required
+      />
       <select v-model="forms.service.days">
         <option>daily</option>
         <option>weekdays</option>

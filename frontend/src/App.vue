@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted } from "vue";
+import { onMounted, watch } from "vue";
 
 import { store } from "./store.js";
 import { initialTab } from "./catalogue.js";
@@ -29,11 +29,23 @@ import TimetablePanel from "./components/TimetablePanel.vue";
 import TripForm from "./components/TripForm.vue";
 import ValidationReport from "./components/ValidationReport.vue";
 
+// A session records the tab the user was working in, not the Data tab
+// the session buttons live on.
+watch(
+  () => store.activeTab,
+  (tab) => {
+    if (tab !== "catalogue") store.workingTab = tab;
+  },
+);
+
 onMounted(async () => {
   createMap();
   await loadCatalogue();
   // Only on startup: later removing every feed must not move the user.
   store.activeTab = initialTab(store.catalogue);
+  // the decided startup tab counts as "worked in" (the watcher only sees
+  // changes made after this)
+  if (store.activeTab !== "catalogue") store.workingTab = store.activeTab;
   checkNetworkAvailable();
 });
 </script>

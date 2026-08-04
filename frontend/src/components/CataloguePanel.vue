@@ -5,12 +5,16 @@ import { store } from "../store.js";
 import { groupedCatalogue } from "../catalogue.js";
 import {
   addFeed,
+  cancelLoadSession,
+  confirmLoadSession,
   createGroup,
   deleteGroup,
   dropFeedInGroup,
+  loadSession,
   mergeSelected,
   openBrowser,
   renameGroup,
+  saveSession,
   toggleNetworkVisible,
 } from "../actions.js";
 import FeedRow from "./FeedRow.vue";
@@ -171,6 +175,62 @@ async function commitRename(name) {
         }}
       </button>
     </form>
+
+    <!-- Sessions: save what is loaded, or bring a saved session back. -->
+    <div class="add-feed session-block">
+      <div class="dir-row">
+        <input
+          v-model="store.session.path"
+          placeholder="session file (.json)"
+        />
+        <button
+          type="button"
+          @click="
+            openBrowser(
+              'sessionPath',
+              'session',
+              store.session.path.trim() || null,
+            )
+          "
+        >
+          Browse…
+        </button>
+      </div>
+      <FileBrowser target="sessionPath" />
+      <div v-if="store.session.confirm" class="crop-panel">
+        <p class="hint">
+          {{
+            store.session.confirm.reason === "osm-edits"
+              ? "Loading this session discards your unsaved OSM network edits."
+              : `Loading this session replaces the ${store.session.confirm.feeds}
+                 loaded feed${store.session.confirm.feeds === 1 ? "" : "s"} (and groups).`
+          }}
+        </p>
+        <div class="mode-row">
+          <button class="primary" type="button" @click="confirmLoadSession">
+            Load anyway
+          </button>
+          <button type="button" @click="cancelLoadSession">Cancel</button>
+        </div>
+      </div>
+      <div class="mode-row">
+        <button
+          type="button"
+          class="primary"
+          :disabled="!store.session.path.trim() || store.session.saving"
+          @click="saveSession"
+        >
+          {{ store.session.saving ? "Saving…" : "Save session" }}
+        </button>
+        <button
+          type="button"
+          :disabled="!store.session.path.trim() || store.session.loading"
+          @click="loadSession()"
+        >
+          {{ store.session.loading ? "Loading…" : "Load session" }}
+        </button>
+      </div>
+    </div>
 
     <form class="add-feed" @submit.prevent="createGroup">
       <div class="dir-row">

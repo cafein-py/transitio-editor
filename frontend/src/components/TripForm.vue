@@ -8,7 +8,11 @@ import { submitTrip } from "../actions.js";
     <summary>New frequency trip</summary>
     <form @submit.prevent="submitTrip">
       <input v-model="forms.trip.route_id" placeholder="route_id" required />
-      <input v-model="forms.trip.service_id" placeholder="service_id" required />
+      <input
+        v-model="forms.trip.service_id"
+        placeholder="service_id"
+        required
+      />
       <input v-model="forms.trip.trip_id" placeholder="trip_id" required />
       <input v-model="forms.trip.shape_id" placeholder="shape_id (optional)" />
       <input v-model="forms.trip.start" required />
@@ -21,7 +25,9 @@ import { submitTrip } from "../actions.js";
           <input v-model.number="entry.offset" type="number" class="offset" />s
         </li>
       </ol>
-      <button type="button" @click="store.tripStops.length = 0">Clear stops</button>
+      <button type="button" @click="store.tripStops.length = 0">
+        Clear stops
+      </button>
       <button>Add trip</button>
     </form>
   </details>

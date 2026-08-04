@@ -1,11 +1,23 @@
 import { describe, expect, it } from "vitest";
 
-import { describeContext, groupNotices, severityCounts } from "../src/notices.js";
+import {
+  describeContext,
+  groupNotices,
+  severityCounts,
+} from "../src/notices.js";
 
 const report = {
   notices: [
-    { code: "empty_row", severity: "WARNING", context: { filename: "routes.txt" } },
-    { code: "empty_row", severity: "WARNING", context: { filename: "trips.txt" } },
+    {
+      code: "empty_row",
+      severity: "WARNING",
+      context: { filename: "routes.txt" },
+    },
+    {
+      code: "empty_row",
+      severity: "WARNING",
+      context: { filename: "trips.txt" },
+    },
     { code: "missing_required_file", severity: "ERROR", context: {} },
     { code: "unknown_column", severity: "INFO", context: { column: "x" } },
   ],

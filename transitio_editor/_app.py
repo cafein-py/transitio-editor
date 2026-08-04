@@ -237,6 +237,17 @@ def _place_bbox(query):
     return (minx, miny, maxx, maxy)
 
 
+def _sha256_file(path):
+    """The streamed SHA-256 hex digest of a file."""
+    import hashlib
+
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _feed_filename(name):
     """A safe ``.zip`` filename from a feed's display name."""
     stem = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-.")[:60]
@@ -945,9 +956,15 @@ def create_app(
             try:
                 report = entry.editor.save(target, check=payload.get("check", True))
             except InvalidFeedError as error:
+                # the file IS written; only the notice gate raised
+                entry.source = os.fspath(target)
                 return {"saved": True, "clean": False, "report": error.report}
             except (TypeError, ValueError) as error:
                 raise HTTPException(422, str(error)) from None
+            # a sourceless (merged/cropped/built) feed becomes sourced once
+            # saved, so later session saves reference it instead of
+            # embedding a stale copy
+            entry.source = os.fspath(target)
             clean = not any(
                 notice["severity"] == "ERROR" for notice in report["notices"]
             )
@@ -1011,13 +1028,406 @@ def create_app(
             loaded = FeedEditor(path)
         except Exception as error:  # noqa: B902
             raise HTTPException(422, f"cannot load feed: {error}") from None
+        name = payload.get("name")
+        if name is not None and (
+            not isinstance(name, str) or not _json_safe_name(name)
+        ):
+            raise HTTPException(422, "'name' must be a JSON-safe string")
         with lock:
             entry = registry.add(
                 loaded,
-                payload.get("name") or default_name(loaded),
+                name or default_name(loaded),
                 source=os.fspath(path),
             )
             return entry_dict(entry, registry)
+
+    _SESSION_MARKER = ".transitio-session"
+
+    def _session_paths(raw):
+        from pathlib import Path
+
+        if not isinstance(raw, str) or not raw.strip():
+            raise HTTPException(422, "'path' must be a file path")
+        try:
+            path = Path(os.path.abspath(Path(raw).expanduser()))
+        except (OSError, RuntimeError, ValueError) as error:
+            # unknown ~user, NUL bytes: a clean 422, not a 500
+            raise HTTPException(422, f"cannot use path: {error}") from None
+        if path.suffix.lower() != ".json":
+            raise HTTPException(422, "a session file must end in .json")
+        return path, path.with_suffix(".data")
+
+    def _prepare_session_data_dir(data_dir):
+        # Never adopt a directory the session did not create: a user-chosen
+        # session name must not make a like-named directory overwritable.
+        marker = data_dir / _SESSION_MARKER
+        try:
+            if data_dir.is_symlink():
+                raise HTTPException(422, f"{data_dir} is a symlink; refusing to use it")
+            if data_dir.exists():
+                if not marker.exists() and any(data_dir.iterdir()):
+                    raise HTTPException(
+                        422,
+                        f"{data_dir} exists and is not a session data directory",
+                    )
+            else:
+                data_dir.mkdir(parents=True)
+            marker.touch()
+        except HTTPException:
+            raise
+        except OSError as error:
+            # a regular file where the directory would go, an unwritable
+            # parent: a clean 422, never a 500
+            raise HTTPException(422, f"cannot use {data_dir}: {error}") from None
+        return data_dir
+
+    def _publish_embedded(editor, target):
+        # Write to a temp name, then hard-link onto the final one: the link
+        # fails atomically if the name exists, so nothing is overwritten.
+        import uuid
+
+        temp = target.with_name(f".tmp-{uuid.uuid4().hex}")
+        # claim the temp name exclusively first: editor.save publishes onto
+        # it with os.replace, which must only ever replace our own
+        # placeholder, never a planted file
+        try:
+            os.close(os.open(temp, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+        except FileExistsError:
+            raise HTTPException(422, f"{temp} already exists") from None
+        try:
+            editor.save(temp, check=False)
+            os.link(temp, target)
+        except FileExistsError:
+            raise HTTPException(422, f"{target} already exists") from None
+        finally:
+            temp.unlink(missing_ok=True)
+            # a failed editor.save can leave its own staging file behind
+            temp.with_name(temp.name + ".part").unlink(missing_ok=True)
+
+    @app.post("/api/session/save")
+    def session_save(payload: dict = Body(...)):
+        """Write the loaded state to a session .json.
+
+        Sourceless feeds (merged, cropped, built) are embedded as zips in
+        a sibling ``<name>.data`` directory; sourced feeds are referenced
+        by path, so edits made to them since their file was written are
+        NOT captured — save the feed first to include them.
+        """
+        import json as json_module
+        import tempfile
+        import uuid
+        from datetime import datetime, timezone
+
+        session_path, data_dir = _session_paths(payload.get("path"))
+        view = payload.get("view")
+        if view is not None:
+            if not isinstance(view, dict):
+                raise HTTPException(422, "'view' must be an object")
+            try:
+                json_module.dumps(view, allow_nan=False, ensure_ascii=False).encode(
+                    "utf-8"
+                )
+            except (ValueError, UnicodeEncodeError):
+                raise HTTPException(422, "'view' must be plain JSON") from None
+        with lock:
+            entries = registry.entries()
+            embedded = [entry for entry in entries if entry.source is None]
+            save_id = uuid.uuid4().hex
+            written = {}
+            if embedded:
+                _prepare_session_data_dir(data_dir)
+                for index, entry in enumerate(embedded):
+                    target = data_dir / (
+                        f"{save_id}-{index}-{_feed_filename(entry.name)}"
+                    )
+                    try:
+                        _publish_embedded(entry.editor, target)
+                    except HTTPException:
+                        raise
+                    except (OSError, TypeError, ValueError) as error:
+                        raise HTTPException(
+                            422, f"cannot write {target}: {error}"
+                        ) from None
+                    written[entry.feed_id] = target
+            feeds = []
+            missing = []
+            for entry in entries:
+                if entry.feed_id in written:
+                    source = written[entry.feed_id]
+                    sha256 = _sha256_file(source)
+                elif entry.source is not None:
+                    source = os.path.abspath(entry.source)
+                    try:
+                        readable = os.path.isfile(source)
+                        sha256 = _sha256_file(source) if readable else None
+                    except OSError:
+                        readable = False
+                        sha256 = None
+                    if not readable:
+                        # recorded anyway (the file may come back), but the
+                        # saver must hear that this feed cannot restore now
+                        missing.append(entry.name)
+                feeds.append(
+                    {
+                        "name": entry.name,
+                        "color": entry.color,
+                        "active": entry.active,
+                        "current": registry.current == entry.feed_id,
+                        "group": entry.group,
+                        "origin": entry.origin,
+                        "source": os.fspath(source),
+                        "sha256": sha256,
+                        "embedded": entry.feed_id in written,
+                    }
+                )
+            session = {
+                "transitio_editor_session": 1,
+                "saved_at": datetime.now(timezone.utc).isoformat(),
+                "groups": registry.groups(),
+                "feeds": feeds,
+                "osm_source": (
+                    os.path.abspath(osm_state["source"])
+                    if osm_state["source"]
+                    else None
+                ),
+                "view": view or {},
+            }
+            try:
+                json_module.dumps(session, allow_nan=False, ensure_ascii=False).encode(
+                    "utf-8"
+                )
+            except (ValueError, UnicodeEncodeError):
+                # e.g. a lone surrogate from a non-UTF-8 filename: restore
+                # would refuse this file, so refuse to write it
+                raise HTTPException(
+                    422, "cannot serialise session (a name or path is not UTF-8)"
+                ) from None
+            temp = None
+            try:
+                session_path.parent.mkdir(parents=True, exist_ok=True)
+                fd, temp = tempfile.mkstemp(
+                    dir=session_path.parent, prefix=".session-", suffix=".part"
+                )
+                with os.fdopen(fd, "w") as handle:
+                    json_module.dump(session, handle, indent=2)
+                os.replace(temp, session_path)
+            except OSError as error:
+                if temp is not None:
+                    try:
+                        os.unlink(temp)
+                    except OSError:
+                        pass
+                raise HTTPException(422, f"cannot write session: {error}") from None
+            # the save is committed above; this tally is informational and
+            # must not fail the request
+            unreferenced = 0
+            try:
+                # only a directory this save (or an earlier one) marked as
+                # session-owned is tallied; a like-named foreign directory
+                # is none of our business
+                if data_dir.is_dir() and (data_dir / _SESSION_MARKER).exists():
+                    kept = {target.name for target in written.values()}
+                    kept.add(_SESSION_MARKER)
+                    # a sourced feed may legitimately point into the data
+                    # directory (e.g. a zip loaded from it by hand)
+                    kept |= {
+                        os.path.basename(feed["source"])
+                        for feed in feeds
+                        if os.path.dirname(feed["source"]) == os.fspath(data_dir)
+                    }
+                    # everything else — older saves' zips, orphans of
+                    # failed ones — is reclaimable-but-untouched
+                    unreferenced = sum(
+                        1
+                        for item in data_dir.iterdir()
+                        if item.is_file() and item.name not in kept
+                    )
+            except OSError:
+                pass
+            return {
+                "path": os.fspath(session_path),
+                "embedded": [entry.name for entry in embedded],
+                "referenced": [
+                    entry.name for entry in entries if entry.source is not None
+                ],
+                "unreferenced_data_files": unreferenced,
+                "missing": missing,
+            }
+
+    @app.post("/api/session/restore")
+    def session_restore(payload: dict = Body(...)):
+        """Rebuild the loaded state from a session .json.
+
+        Replacing loaded feeds/groups needs ``replace: true``; discarding
+        unsaved OSM network edits needs ``discard_edits: true`` — two
+        separate consents. Missing feed files are skipped and reported.
+        """
+        import json as json_module
+
+        from transitio.edit import FeedEditor
+
+        session_path, _ = _session_paths(payload.get("path"))
+        replace = payload.get("replace", False)
+        discard_edits = payload.get("discard_edits", False)
+        if not isinstance(replace, bool) or not isinstance(discard_edits, bool):
+            raise HTTPException(422, "'replace' and 'discard_edits' must be booleans")
+        with lock:
+            # parse inside the lock, so a restore racing a save of the same
+            # file cannot rebuild from a stale snapshot
+            # regular files only: a FIFO would block every request behind
+            # the app lock
+            if not session_path.is_file():
+                raise HTTPException(422, f"not a session file: {session_path}")
+            try:
+                session = json_module.loads(session_path.read_text(encoding="utf-8"))
+            except OSError as error:
+                raise HTTPException(422, f"cannot read session: {error}") from None
+            except ValueError as error:
+                raise HTTPException(422, f"not a session file: {error}") from None
+            version = (
+                session.get("transitio_editor_session")
+                if isinstance(session, dict)
+                else None
+            )
+            if isinstance(version, bool) or version != 1:
+                raise HTTPException(422, "not a transitio-editor session file")
+            # required, never defaulted: a truncated file must not read as
+            # an intentionally empty session
+            required = ("groups", "feeds", "view", "osm_source")
+            if any(key not in session for key in required):
+                raise HTTPException(422, "malformed session file")
+            groups = session["groups"]
+            records = session["feeds"]
+            view = session["view"]
+            osm_source = session["osm_source"]
+            if osm_source is not None and not isinstance(osm_source, str):
+                raise HTTPException(422, "malformed session file")
+
+            try:
+                json_module.dumps(session, allow_nan=False, ensure_ascii=False).encode(
+                    "utf-8"
+                )
+            except (ValueError, UnicodeEncodeError):
+                raise HTTPException(422, "malformed session file") from None
+
+            def _record_ok(record):
+                # every field the save writes must be present and typed;
+                # format growth adds NEW keys, which stay ignorable
+                if not isinstance(record, dict):
+                    return False
+                strings = ("name", "source", "sha256", "color", "group", "origin")
+                flags = ("active", "current", "embedded")
+                if any(key not in record for key in strings + flags):
+                    return False
+                if any(
+                    record[key] is not None and not isinstance(record[key], str)
+                    for key in strings
+                ):
+                    return False
+                if any(not isinstance(record[key], bool) for key in flags):
+                    return False
+                if not isinstance(record["name"], str) or not isinstance(
+                    record["source"], str
+                ):
+                    return False
+                return _json_safe_name(record["name"])
+
+            groups_ok = isinstance(groups, list) and all(
+                isinstance(group, str) and _group_name(group) == group
+                for group in groups
+            )
+            if (
+                not groups_ok
+                or len(set(groups)) != len(groups)
+                or not isinstance(records, list)
+                or not all(_record_ok(record) for record in records)
+                or (
+                    bool(records)
+                    and sum(1 for record in records if record.get("current")) != 1
+                )
+                or any(
+                    record.get("group") is not None
+                    and record.get("group") not in groups
+                    for record in records
+                )
+                or not isinstance(view, dict)
+            ):
+                # malformed sessions fail before anything is touched
+                raise HTTPException(422, "malformed session file")
+            loaded = [
+                entry
+                for entry in registry.entries()
+                if entry.source is not None or entry.editor.tables
+            ]
+            if (loaded or registry.groups()) and not replace:
+                raise HTTPException(409, {"reason": "feeds", "feeds": len(loaded)})
+            if osm_state["dirty"] and not discard_edits:
+                raise HTTPException(409, {"reason": "osm-edits"})
+
+            registry.reset()
+            for group in groups:
+                registry.add_group(group)
+            skipped, warnings = [], []
+            current_id = None
+            for record in records:
+                name = record["name"]
+                source = record.get("source")
+                # regular files only: a FIFO here would block the app lock
+                if not isinstance(source, str) or not os.path.isfile(source):
+                    skipped.append(
+                        {"name": name, "reason": f"file not found: {source}"}
+                    )
+                    continue
+                try:
+                    recorded = record.get("sha256")
+                    changed = bool(recorded) and _sha256_file(source) != recorded
+                    editor = FeedEditor(source)
+                except Exception as error:  # noqa: B902
+                    # vanished or unreadable mid-restore: a skip, not a 500
+                    skipped.append({"name": name, "reason": str(error)})
+                    continue
+                if changed:
+                    warnings.append(f"{name}: changed since the session was saved")
+                entry = registry.add(
+                    editor,
+                    name,
+                    # an embedded zip is session storage, not a user file:
+                    # the entry stays sourceless so the next save embeds
+                    # its then-current tables
+                    source=None if record.get("embedded") else source,
+                    origin=record.get("origin"),
+                    group=record.get("group"),
+                    color=record.get("color"),
+                )
+                entry.active = bool(record.get("active", True))
+                if record.get("current"):
+                    current_id = entry.feed_id
+            if current_id is not None:
+                registry.current = current_id
+            elif registry.entries() and any(
+                record.get("current") for record in records
+            ):
+                warnings.append(
+                    "the session's current feed was skipped; "
+                    "the first restored feed is current"
+                )
+
+            osm_state["editor"] = None
+            osm_state["dirty"] = False
+            if isinstance(osm_source, str) and os.path.isfile(osm_source):
+                osm_state["source"] = osm_source
+            else:
+                if osm_source:
+                    warnings.append(f"OSM extract not found: {osm_source}")
+                osm_state["source"] = None
+            return {
+                "feeds": [entry_dict(entry, registry) for entry in registry.entries()],
+                "groups": registry.groups(),
+                "current": registry.current,
+                "skipped": skipped,
+                "warnings": warnings,
+                "view": view,
+            }
 
     @app.post("/api/catalogue/merge")
     def catalogue_merge(payload: dict = Body(...)):
@@ -1195,7 +1605,11 @@ def create_app(
             if "active" in payload:
                 entry.active = payload["active"]
             if "name" in payload:
-                entry.name = str(payload["name"])
+                if not isinstance(payload["name"], str) or not _json_safe_name(
+                    payload["name"]
+                ):
+                    raise HTTPException(422, "'name' must be a JSON-safe string")
+                entry.name = payload["name"]
             if "group" in payload:
                 entry.group = payload["group"]
             return entry_dict(entry, registry)
@@ -1264,6 +1678,7 @@ def create_app(
         except OSError as error:  # e.g. the directory vanished meanwhile
             raise HTTPException(404, f"cannot list: {error}") from None
         feeds = []
+        sessions = []
         for entry in entries:
             try:
                 if entry.name.startswith(".") or not _json_safe_name(entry.name):
@@ -1280,6 +1695,12 @@ def create_app(
                     and os.access(entry, os.R_OK)
                 ):
                     feeds.append(entry.name)
+                elif (
+                    entry.suffix.lower() == ".json"
+                    and entry.is_file()
+                    and os.access(entry, os.R_OK)
+                ):
+                    sessions.append(entry.name)
             except OSError:
                 continue  # unreadable entry: skip it
         parent = os.fspath(base.parent) if base.parent != base else None
@@ -1288,6 +1709,7 @@ def create_app(
             "parent": parent,
             "dirs": sorted(subdirs),
             "feeds": sorted(feeds),
+            "sessions": sorted(sessions),
         }
 
     @app.get("/api/search")

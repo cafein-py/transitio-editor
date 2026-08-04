@@ -8,20 +8,33 @@ import {
   mergeStatus,
   moveFeedToGroup,
 } from "./catalogue.js";
+import {
+  restoreSessionStatus,
+  saveSessionStatus,
+  sessionRestorePlan,
+  sessionView,
+} from "./sessions.js";
 import * as mapBridge from "./map.js";
 import { MODES, UNKNOWN_MODE } from "./modes.js";
 import { isDownloaded } from "./search.js";
 import { forms, resetForms, store } from "./store.js";
 
+// A slow pre-restore availability check must not overwrite the state a
+// session restore has since installed.
+let networkAvailableSeq = 0;
+
 export async function checkNetworkAvailable() {
+  const seq = ++networkAvailableSeq;
   try {
     const body = await api("GET", "/api/network");
+    if (seq !== networkAvailableSeq) return;
     store.network.available = Boolean(body.available);
     store.network.source = body.source || null;
     // Both domains are visible by default: load the network eagerly so it
     // shows alongside the feed from the start, not only after opening the tab.
     if (store.network.available) await loadNetwork();
   } catch (error) {
+    if (seq !== networkAvailableSeq) return;
     store.network.available = false;
   }
 }
@@ -33,7 +46,7 @@ export async function loadNetwork() {
   net.error = "";
   try {
     await mapBridge.mapReady; // sources exist before we set their data
-    await mapBridge.fetchNetwork();
+    if ((await mapBridge.fetchNetwork()) === false) return; // superseded
     net.loaded = true;
     mapBridge.setNetworkVisible(net.visible);
   } catch (error) {
@@ -759,6 +772,129 @@ export async function cropToShape() {
   }
 }
 
+// Saving and restoring sessions. The view snapshot and the restore
+// decision table are pure (sessions.js); these actions do the IO and
+// call the map bridge.
+export async function saveSession() {
+  const session = store.session;
+  const path = session.path.trim();
+  if (!path || session.saving) return;
+  session.saving = true;
+  try {
+    const base = path.split(/[\\/]/).pop(); // both separator styles
+    // derive .json only for an extensionless name (a leading or trailing
+    // dot is not an extension); a wrong real extension is the server's
+    // 422 to give, not something to silently double up
+    const hasExtension = /[^./\\]\.[^.]+$/.test(base);
+    const target = hasExtension ? path : `${path.replace(/\.$/, "")}.json`;
+    const body = await api("POST", "/api/session/save", {
+      path: target,
+      view: sessionView(store, mapBridge.getCamera()),
+    });
+    session.path = body.path;
+    store.status = saveSessionStatus(body);
+  } catch (error) {
+    store.status = error.message;
+  } finally {
+    session.saving = false;
+  }
+}
+
+function applySessionView(view) {
+  const plan = sessionRestorePlan(view || {});
+  if (plan.basemap) mapBridge.setBasemap(plan.basemap);
+  if (plan.hiddenModes) {
+    store.hiddenModes.splice(0, store.hiddenModes.length, ...plan.hiddenModes);
+    mapBridge.setHiddenModes([...store.hiddenModes]);
+  }
+  if (plan.shapeColorBy) setShapeColorBy(plan.shapeColorBy);
+  if (plan.stopsVisible !== undefined) {
+    store.stopsVisible = plan.stopsVisible;
+    mapBridge.setStopsVisible(plan.stopsVisible);
+  }
+  if (plan.activeTab) {
+    store.activeTab = plan.activeTab;
+    // the restored tab is now the working tab (or none, for Data)
+    store.workingTab = plan.activeTab === "catalogue" ? null : plan.activeTab;
+  }
+  if (plan.camera) mapBridge.jumpTo(plan.camera.center, plan.camera.zoom);
+  else if (plan.fit) mapBridge.fitToStops();
+}
+
+export async function loadSession(flags = {}) {
+  const session = store.session;
+  const path = session.path.trim();
+  if (!path || session.loading) return;
+  session.loading = true;
+  try {
+    const body = await api("POST", "/api/session/restore", {
+      path,
+      ...flags,
+    });
+    session.confirm = null;
+    await mapBridge.mapReady; // layer resets below need the sources
+    resetFeedScopedState();
+    // the old network's layers, drafts and acquire state must not
+    // survive into the new session; bump the resolve seq so an in-flight
+    // resolve cannot repopulate it either
+    store.merge.selected = []; // ids from the replaced catalogue
+    resolveSeq += 1;
+    mapBridge.invalidateNetwork(); // an in-flight fetch must not repaint
+    Object.assign(store.network.acquire, {
+      place: "",
+      resolving: false,
+      resolved: null,
+      downloading: false,
+      error: "",
+    });
+    Object.assign(store.network, {
+      loaded: false,
+      loading: false,
+      selected: null,
+      nodeCount: 0,
+      wayCount: 0,
+      mode: "select",
+      movingNode: null,
+      draw: [],
+      error: "",
+    });
+    mapBridge.clearNetworkDraw(); // a way begun against the old extract
+    mapBridge.setNetworkData(
+      { type: "FeatureCollection", features: [] },
+      { type: "FeatureCollection", features: [] },
+    );
+    await loadCatalogue();
+    await mapBridge.refreshAll(false);
+    await mapBridge.refreshSummary();
+    await checkNetworkAvailable();
+    applySessionView(body.view);
+    store.status = restoreSessionStatus(body);
+  } catch (error) {
+    const detail = error.status === 409 ? error.detail : null;
+    if (detail && typeof detail === "object") {
+      // the server names what would be lost; ask, then retry with the
+      // matching flag added (both confirms can appear in sequence)
+      session.confirm = { ...detail, flags };
+    } else {
+      store.status = error.message;
+    }
+  } finally {
+    session.loading = false;
+  }
+}
+
+export async function confirmLoadSession() {
+  const confirm = store.session.confirm;
+  if (!confirm) return;
+  const flag = confirm.reason === "osm-edits" ? "discard_edits" : "replace";
+  store.session.confirm = null;
+  await loadSession({ ...confirm.flags, [flag]: true });
+}
+
+export function cancelLoadSession() {
+  store.session.confirm = null;
+}
+
 export function toggleMergeSelected(feed) {
   const selected = store.merge.selected;
   store.merge.selected = selected.includes(feed.feed_id)
@@ -889,6 +1025,7 @@ export async function openBrowser(target, mode, path) {
     parent: null,
     dirs: [],
     feeds: [],
+    sessions: [],
     error: "",
   });
   await browseTo(path);
@@ -911,6 +1048,7 @@ export async function browseTo(path) {
       parent: listing.parent,
       dirs: listing.dirs,
       feeds: listing.feeds || [],
+      sessions: listing.sessions || [],
       error: "",
     });
   } catch (error) {
@@ -930,7 +1068,12 @@ function applyBrowseChoice(value) {
   if (target === "downloadDir") store.search.downloadDir = value;
   else if (target === "feedPath") store.newFeedPath = value;
   else if (target === "mergeDir") store.merge.directory = value;
+  else if (target === "sessionPath") store.session.path = value;
   closeBrowser(); // a pending listing must not reopen it over the choice
+}
+
+export function chooseBrowsedSession(name) {
+  applyBrowseChoice(`${store.browse.path}/${name}`);
 }
 
 export function chooseBrowsedDir() {
