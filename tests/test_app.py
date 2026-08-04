@@ -641,6 +641,108 @@ def test_catalogue_add_errors(editor, tmp_path):
     assert client.post("/api/catalogue", json={"path": str(bad)}).status_code == 422
 
 
+def test_catalogue_merge_combines_live_editors(editor, tmp_path):
+    client = TestClient(create_app(editor))
+    other = _write_feed(tmp_path / "other.zip", "z9", 60.30, 25.10)
+    second = client.post("/api/catalogue", json={"path": str(other), "name": "Metro"})
+    first_id = client.get("/api/catalogue").json()["feeds"][0]["feed_id"]
+    second_id = second.json()["feed_id"]
+
+    # an unsaved edit on the first feed must reach the merged result
+    assert (
+        client.patch("/api/stops/s1", json={"stop_name": "Kamppi M"}).status_code == 200
+    )
+
+    merged = client.post(
+        "/api/catalogue/merge", json={"feed_ids": [first_id, second_id]}
+    )
+    assert merged.status_code == 200
+    entry = merged.json()
+    assert entry["current"] is True and entry["active"] is True
+    assert entry["source"] is None
+    assert entry["dropped_files"] == []
+    assert entry["name"].startswith("feed.zip + Metro")
+    assert entry["tables"]["stops.txt"] == 3  # 2 + 1
+    assert entry["tables"]["agency.txt"] == 2
+
+    rows = client.get("/api/tables/stops.txt").json()["rows"]
+    names = {row["stop_name"] for row in rows}
+    assert "Kamppi M" in names  # the live edit, not the file on disk
+    ids = {row["stop_id"] for row in rows}
+    assert all(":" in stop_id for stop_id in ids)  # namespaced per source feed
+
+    # the merged feed is editable and saveable like any other loaded feed
+    assert (
+        client.patch(
+            f"/api/stops/{rows[0]['stop_id']}", json={"stop_name": "M"}
+        ).status_code
+        == 200
+    )
+    assert client.post("/api/save", json={}).status_code == 422  # no source path
+    saved = client.post(
+        "/api/save", json={"path": str(tmp_path / "merged.zip"), "check": False}
+    )
+    assert saved.status_code == 200 and (tmp_path / "merged.zip").exists()
+
+
+def test_catalogue_merge_names_and_drops(editor, tmp_path):
+    import pandas as pd
+
+    editor.tables["feed_info.txt"] = pd.DataFrame(
+        {"feed_publisher_name": ["HSL"], "feed_lang": ["fi"]}
+    )
+    client = TestClient(create_app(editor))
+    other = _write_feed(tmp_path / "other.zip", "z9", 60.30, 25.10)
+    second = client.post("/api/catalogue", json={"path": str(other)}).json()
+    first_id = client.get("/api/catalogue").json()["feeds"][0]["feed_id"]
+
+    merged = client.post(
+        "/api/catalogue/merge",
+        json={"feed_ids": [first_id, second["feed_id"]], "name": "Combined"},
+    ).json()
+    # feed_info describes one source feed, so the merge drops and reports it
+    assert merged["dropped_files"] == ["feed_info.txt"]
+    assert "feed_info.txt" not in merged["tables"]
+
+    entry = client.get("/api/catalogue").json()["feeds"][-1]
+    assert entry["name"] == "Combined" and entry["current"] is True
+    assert "dropped_files" not in entry  # response-only, never persisted
+
+
+def test_catalogue_merge_errors(editor, tmp_path):
+    client = TestClient(create_app(editor))
+    first_id = client.get("/api/catalogue").json()["feeds"][0]["feed_id"]
+    other = _write_feed(tmp_path / "other.zip", "z9", 60.30, 25.10)
+    second_id = client.post("/api/catalogue", json={"path": str(other)}).json()[
+        "feed_id"
+    ]
+    for body in (
+        {},
+        {"feed_ids": first_id},
+        {"feed_ids": [first_id]},
+        {"feed_ids": [first_id, 5]},
+        {"feed_ids": [first_id, first_id]},  # a feed cannot merge with itself
+        {"feed_ids": [first_id, "nope"]},
+    ):
+        assert client.post("/api/catalogue/merge", json=body).status_code == 422
+
+    assert second_id  # both feeds are in the catalogue
+
+    # a GTFS-Flex feed cannot be namespaced, so the merge is refused
+    flex = FeedEditor(other)
+    flex.tables["stop_times.txt"]["location_id"] = "loc"
+    flex_client = TestClient(create_app(flex))
+    flex_first = flex_client.get("/api/catalogue").json()["feeds"][0]["feed_id"]
+    flex_second = flex_client.post("/api/catalogue", json={"path": str(other)}).json()[
+        "feed_id"
+    ]
+    refused = flex_client.post(
+        "/api/catalogue/merge", json={"feed_ids": [flex_first, flex_second]}
+    )
+    assert refused.status_code == 422
+    assert "location_id" in refused.json()["detail"]
+
+
 def test_catalogue_rejects_malformed_inputs(editor):
     client = TestClient(create_app(editor))
     assert client.post("/api/catalogue", json={"path": ["a", "b"]}).status_code == 422

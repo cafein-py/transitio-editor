@@ -5,9 +5,11 @@ import { store } from "../store.js";
 import { feedModes, feedTableSummary } from "../catalogue.js";
 import {
   addFeed,
+  mergeSelected,
   removeFeed,
   setCurrentFeed,
   toggleFeedActive,
+  toggleMergeSelected,
   toggleNetworkVisible,
 } from "../actions.js";
 
@@ -15,6 +17,8 @@ const osmName = computed(() => {
   const source = store.network.source;
   return source ? source.split("/").pop() : "OSM network";
 });
+
+const canMerge = computed(() => store.merge.selected.length >= 2);
 </script>
 
 <template>
@@ -29,6 +33,7 @@ const osmName = computed(() => {
           <th title="shown on map">show</th>
           <th>feed</th>
           <th title="edit target">edit</th>
+          <th title="pick feeds to merge">merge</th>
           <th></th>
         </tr>
       </thead>
@@ -70,6 +75,13 @@ const osmName = computed(() => {
             />
           </td>
           <td>
+            <input
+              type="checkbox"
+              :checked="store.merge.selected.includes(feed.feed_id)"
+              @change="toggleMergeSelected(feed)"
+            />
+          </td>
+          <td>
             <button
               class="remove"
               title="remove from catalogue"
@@ -98,6 +110,13 @@ const osmName = computed(() => {
         {{ store.network.wayCount }} ways, {{ store.network.nodeCount }} nodes
       </span>
     </div>
+
+    <form v-if="canMerge" class="add-feed" @submit.prevent="mergeSelected">
+      <input v-model="store.merge.name" placeholder="name for the merged feed" />
+      <button class="primary" type="submit" :disabled="store.merge.merging">
+        {{ store.merge.merging ? "Merging…" : `Merge ${store.merge.selected.length} feeds` }}
+      </button>
+    </form>
 
     <form class="add-feed" @submit.prevent="addFeed">
       <input

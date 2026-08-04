@@ -22,3 +22,11 @@ export function feedModes(modes) {
   if (!modes) return [];
   return MODES.filter((mode) => modes.includes(mode.code));
 }
+
+// The status line after a merge; files the merge could not carry over
+// are named so the loss is visible.
+export function mergeStatus(name, droppedFiles) {
+  const dropped = droppedFiles || [];
+  if (!dropped.length) return `merged into "${name}"`;
+  return `merged into "${name}" — ${dropped.join(", ")} not carried over`;
+}

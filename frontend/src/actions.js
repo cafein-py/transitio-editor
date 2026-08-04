@@ -2,6 +2,7 @@
 // and/or calls the API, then refreshes the map. `wrap` funnels errors to
 // the status line and marks the validation report stale.
 import { api } from "./api.js";
+import { mergeStatus } from "./catalogue.js";
 import * as mapBridge from "./map.js";
 import { MODES, UNKNOWN_MODE } from "./modes.js";
 import { isDownloaded } from "./search.js";
@@ -604,10 +605,44 @@ export async function removeFeed(feed) {
     await api("DELETE", `/api/catalogue/${encodeURIComponent(feed.feed_id)}`);
     // Removing the current feed reassigns current, so drop its state too.
     if (feed.current) resetFeedScopedState();
+    store.merge.selected = store.merge.selected.filter(
+      (id) => id !== feed.feed_id,
+    );
     await loadCatalogue();
     await mapBridge.refreshAll(false);
   } catch (error) {
     store.status = error.message;
+  }
+}
+
+export function toggleMergeSelected(feed) {
+  const selected = store.merge.selected;
+  store.merge.selected = selected.includes(feed.feed_id)
+    ? selected.filter((id) => id !== feed.feed_id)
+    : [...selected, feed.feed_id];
+}
+
+export async function mergeSelected() {
+  const merge = store.merge;
+  if (merge.selected.length < 2 || merge.merging) return;
+  merge.merging = true;
+  try {
+    const body = await api("POST", "/api/catalogue/merge", {
+      feed_ids: [...merge.selected],
+      name: merge.name.trim(),
+    });
+    // The merge makes the new feed current, so old feed-scoped state goes.
+    resetFeedScopedState();
+    merge.selected = [];
+    merge.name = "";
+    await loadCatalogue();
+    await mapBridge.refreshAll(false);
+    await mapBridge.refreshSummary();
+    store.status = mergeStatus(body.name, body.dropped_files);
+  } catch (error) {
+    store.status = error.message;
+  } finally {
+    merge.merging = false;
   }
 }
 

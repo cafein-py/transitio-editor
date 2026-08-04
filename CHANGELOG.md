@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Merging feeds from the Data tab: tick two or more catalogue entries and
+  merge them into a single new feed (optionally named), which becomes the
+  current one. The merge runs over the loaded editors, so unsaved edits
+  are included, and namespaces every id per source feed so colliding ids
+  stay distinct (`POST /api/catalogue/merge`, over transitio's
+  `merge_tables`). Files the merge cannot carry over — `feed_info.txt`,
+  `translations.txt` and non-CSV archive entries — are named in the
+  status line.
 - A "show stops" toggle: the Edit tab's legend panel (now "Map display")
   can hide the stop markers independently of the route shapes; the panel
   starts open so the mode legend is immediately visible.
