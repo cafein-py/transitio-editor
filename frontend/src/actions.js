@@ -799,24 +799,33 @@ export async function runSearch() {
   s.searched = true;
   try {
     const params = new URLSearchParams();
-    if (s.country.trim()) params.set("country", s.country.trim());
-    if (s.subdivision.trim()) params.set("subdivision", s.subdivision.trim());
-    if (s.municipality.trim())
-      params.set("municipality", s.municipality.trim());
+    const q = s.q.trim();
+    let areaHint = "";
+    if (q) {
+      params.set("q", q); // a typed place decides the area
+    } else {
+      const bbox = searchAoiBbox();
+      if (bbox) params.set("bbox", bbox.join(","));
+      // Don't silently drop a requested area filter.
+      if (s.aoiMode !== "none" && !bbox) {
+        areaHint = "no area available — searched everywhere";
+      }
+    }
     if (s.officialOnly) params.set("official", "true");
-    const bbox = searchAoiBbox();
-    if (bbox) params.set("bbox", bbox.join(","));
     params.set("limit", String(s.limit));
     const body = await api("GET", `/api/search?${params.toString()}`);
     s.results = body.feeds;
     s.csvFallback = body.csv_fallback;
-    // Don't silently drop a requested area filter.
-    store.status =
-      s.aoiMode !== "none" && !bbox
-        ? "no area available — searched everywhere"
-        : "";
+    if (body.place) {
+      // the search meant a place: show it
+      mapBridge.fitBbox(body.place.bbox);
+      store.status = `showing ${body.place.query}`;
+    } else {
+      store.status = areaHint;
+    }
   } catch (error) {
     s.results = [];
+    s.searched = false; // an error is not "no feeds found"
     store.status = error.message;
   } finally {
     s.searching = false;

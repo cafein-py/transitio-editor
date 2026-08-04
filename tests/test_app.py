@@ -1386,6 +1386,76 @@ def test_search_forwards_bbox_and_filters(editor):
     assert call["limit"] == 10
 
 
+def test_search_by_place_geocodes_and_reports_it(editor, monkeypatch):
+    import transitio_editor._app as app_module
+
+    monkeypatch.setattr(
+        app_module, "_place_bbox", lambda query: (24.8, 60.0, 25.3, 60.4)
+    )
+    stub = _StubCatalog([_catalog_feed()], token="tok")
+    client = TestClient(create_app(editor, catalog_factory=lambda: stub))
+    body = client.get("/api/search", params={"q": " Helsinki "}).json()
+    # the geocoded box drives the feed search...
+    assert stub.calls[0]["aoi"] == (24.8, 60.0, 25.3, 60.4)
+    # ...and comes back so the map can fly there
+    assert body["place"] == {"query": "Helsinki", "bbox": [24.8, 60.0, 25.3, 60.4]}
+    assert [feed["id"] for feed in body["feeds"]] == ["mdb-1"]
+
+    # a typed place decides the area even when a bbox is also sent —
+    # including a malformed one, which is ignored rather than validated
+    client.get("/api/search", params={"q": "Helsinki", "bbox": "0,0,1,1"})
+    assert stub.calls[1]["aoi"] == (24.8, 60.0, 25.3, 60.4)
+    ok = client.get("/api/search", params={"q": "Helsinki", "bbox": "garbage"})
+    assert ok.status_code == 200
+
+    # a blank query is no place search at all
+    body = client.get("/api/search", params={"q": "  "}).json()
+    assert "place" not in body
+    assert stub.calls[-1]["aoi"] is None
+
+
+def test_search_place_not_found_is_422(editor, monkeypatch):
+    import transitio_editor._app as app_module
+
+    def refuse(query):
+        raise ValueError("Nominatim found nothing")
+
+    monkeypatch.setattr(app_module, "_place_bbox", refuse)
+    stub = _StubCatalog([], token="tok")
+    client = TestClient(create_app(editor, catalog_factory=lambda: stub))
+    response = client.get("/api/search", params={"q": "Atlantis"})
+    assert response.status_code == 422
+    assert "Atlantis" in response.json()["detail"]
+    assert stub.calls == []  # never reached the catalogue
+
+
+def test_place_bbox_pads_tiny_places(monkeypatch):
+    import transitio_editor._app as app_module
+
+    # a village geocoded to a point still yields a searchable area
+    monkeypatch.setattr(
+        app_module, "_geocode_bounds", lambda query: (24.9, 60.1, 24.9, 60.1)
+    )
+    minx, miny, maxx, maxy = app_module._place_bbox("somewhere")
+    assert maxx - minx == pytest.approx(0.1)
+    assert maxy - miny == pytest.approx(0.05)
+
+    # a city-sized box is left alone
+    monkeypatch.setattr(
+        app_module, "_geocode_bounds", lambda query: (24.5, 59.9, 25.5, 60.4)
+    )
+    assert app_module._place_bbox("city") == (24.5, 59.9, 25.5, 60.4)
+
+    # at a WGS84 corner the box shifts inward instead of shrinking
+    monkeypatch.setattr(
+        app_module, "_geocode_bounds", lambda query: (179.99, 89.99, 180.0, 90.0)
+    )
+    minx, miny, maxx, maxy = app_module._place_bbox("pole")
+    assert maxx <= 180 and maxy <= 90
+    assert maxx - minx == pytest.approx(0.1)
+    assert maxy - miny == pytest.approx(0.05)
+
+
 def test_search_rejects_malformed_bbox(editor):
     stub = _StubCatalog([], token="tok")
     client = TestClient(create_app(editor, catalog_factory=lambda: stub))

@@ -45,7 +45,11 @@ watch(
 
 const sortedResults = computed(() =>
   store.search.sortKey
-    ? sortFeeds(store.search.results, store.search.sortKey, store.search.sortDir)
+    ? sortFeeds(
+        store.search.results,
+        store.search.sortKey,
+        store.search.sortDir,
+      )
     : store.search.results,
 );
 
@@ -68,13 +72,15 @@ function sortArrow(key) {
 <template>
   <div class="panel search">
     <p class="hint">
-      Search the Mobility Database for GTFS feeds. Without a
+      Type a place to fly the map there and list the GTFS feeds serving it.
+      Leave it empty to search the current map view or a drawn area. Without a
       <code>MOBILITY_API_REFRESH_TOKEN</code> the CSV catalogue export is used.
     </p>
     <form @submit.prevent="runSearch">
-      <input v-model="store.search.country" placeholder="country code (e.g. FI)" />
-      <input v-model="store.search.subdivision" placeholder="subdivision / region" />
-      <input v-model="store.search.municipality" placeholder="municipality" />
+      <input
+        v-model="store.search.q"
+        placeholder="place — e.g. Helsinki, New York"
+      />
       <label class="check">
         <input type="checkbox" v-model="store.search.officialOnly" />
         official feeds only
@@ -109,7 +115,11 @@ function sortArrow(key) {
         <button
           type="button"
           @click="
-            openBrowser('downloadDir', 'dir', store.search.downloadDir.trim() || null)
+            openBrowser(
+              'downloadDir',
+              'dir',
+              store.search.downloadDir.trim() || null,
+            )
           "
         >
           Browse…
@@ -121,7 +131,10 @@ function sortArrow(key) {
       </button>
     </form>
 
-    <p v-if="store.search.csvFallback && store.search.results.length" class="hint">
+    <p
+      v-if="store.search.csvFallback && store.search.results.length"
+      class="hint"
+    >
       CSV fallback — no historical datasets or hosted validation reports.
     </p>
 
@@ -137,9 +150,15 @@ function sortArrow(key) {
               @change="setAllSelected(selectable, !allSelected)"
             />
           </th>
-          <th class="sortable" @click="sortBy('provider')">feed{{ sortArrow("provider") }}</th>
-          <th class="sortable" @click="sortBy('location')">location{{ sortArrow("location") }}</th>
-          <th class="sortable" @click="sortBy('status')">status{{ sortArrow("status") }}</th>
+          <th class="sortable" @click="sortBy('provider')">
+            feed{{ sortArrow("provider") }}
+          </th>
+          <th class="sortable" @click="sortBy('location')">
+            location{{ sortArrow("location") }}
+          </th>
+          <th class="sortable" @click="sortBy('status')">
+            status{{ sortArrow("status") }}
+          </th>
           <th></th>
         </tr>
       </thead>
@@ -147,7 +166,9 @@ function sortArrow(key) {
         <tr v-for="feed in sortedResults" :key="feed.id">
           <td>
             <input
-              v-if="feed.downloadable && !isDownloaded(store.catalogue, feed.id)"
+              v-if="
+                feed.downloadable && !isDownloaded(store.catalogue, feed.id)
+              "
               type="checkbox"
               :checked="store.search.selected.includes(feed.id)"
               :disabled="store.search.bulk.running"
@@ -156,7 +177,9 @@ function sortArrow(key) {
           </td>
           <td>
             <span class="feed-name">{{ feed.provider || feed.id }}</span>
-            <span v-if="feed.official" class="official" title="official feed">✓</span>
+            <span v-if="feed.official" class="official" title="official feed"
+              >✓</span
+            >
             <a
               v-if="safeHttpUrl(feed.license_url)"
               :href="safeHttpUrl(feed.license_url)"
@@ -203,7 +226,10 @@ function sortArrow(key) {
           : `Download selected (${store.search.selected.length})`
       }}
     </button>
-    <p v-else-if="store.search.searched && !store.search.searching" class="hint">
+    <p
+      v-else-if="store.search.searched && !store.search.searching"
+      class="hint"
+    >
       no feeds found.
     </p>
   </div>
