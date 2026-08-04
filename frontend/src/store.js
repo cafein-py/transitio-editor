@@ -25,6 +25,9 @@ export const store = reactive({
   source: null,
   tables: {},
   catalogue: [], // [{ feed_id, name, active, color, current, source, tables }]
+  groups: [], // user-named feed groups, in creation order
+  newGroupName: "",
+  draggingFeedId: null, // feed being dragged between groups
   currentFeedId: null,
   newFeedPath: "",
   merge: {

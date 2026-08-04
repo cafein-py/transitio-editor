@@ -35,6 +35,32 @@ export function initialTab(catalogue) {
   return (catalogue || []).some(hasFeedContent) ? "view" : "search";
 }
 
+// The catalogue as display sections: one per known group in order,
+// then the ungrouped feeds. Empty groups are kept — they are drop
+// targets, and a group outlives its last member.
+export function groupedCatalogue(catalogue, groups) {
+  const feeds = catalogue || [];
+  const known = groups || [];
+  const sections = known.map((name) => ({
+    name,
+    feeds: feeds.filter((feed) => feed.group === name),
+  }));
+  const ungrouped = feeds.filter(
+    (feed) => !feed.group || !known.includes(feed.group),
+  );
+  return { sections, ungrouped };
+}
+
+// Where a drop lands: the group a feed should move to, or null for the
+// ungrouped section. Returns null when nothing would change, so a drop
+// onto the feed's own group costs no request.
+export function moveFeedToGroup(feed, group) {
+  if (!feed) return null;
+  const target = group || null;
+  if ((feed.group || null) === target) return null;
+  return { feed_id: feed.feed_id, group: target };
+}
+
 // The status line after a merge: where it went (when saved) and any files
 // the merge could not carry over, so the loss is visible.
 export function mergeStatus(name, droppedFiles, savedPath) {

@@ -788,6 +788,112 @@ def test_catalogue_merge_errors(editor, tmp_path):
     assert "location_id" in refused.json()["detail"]
 
 
+def test_catalogue_groups_round_trip(editor, tmp_path):
+    client = TestClient(create_app(editor))
+    other = _write_feed(tmp_path / "other.zip", "z9", 60.30, 25.10)
+    second = client.post("/api/catalogue", json={"path": str(other)}).json()
+    first_id = client.get("/api/catalogue").json()["feeds"][0]["feed_id"]
+
+    created = client.post("/api/catalogue/groups", json={"name": "Cropped feeds"})
+    assert created.status_code == 200
+    assert created.json()["groups"] == ["Cropped feeds"]
+    # a group with a slash in its name is addressable: names travel in
+    # the body (or a query parameter), never in the path
+    client.post("/api/catalogue/groups", json={"name": "a/b"})
+
+    filed = client.patch(f"/api/catalogue/{first_id}", json={"group": "Cropped feeds"})
+    assert filed.json()["group"] == "Cropped feeds"
+
+    renamed = client.patch(
+        "/api/catalogue/groups",
+        json={"name": "Cropped feeds", "new_name": "Helsinki area"},
+    )
+    assert renamed.json()["groups"] == ["Helsinki area", "a/b"]
+    feeds = {f["feed_id"]: f for f in client.get("/api/catalogue").json()["feeds"]}
+    assert feeds[first_id]["group"] == "Helsinki area"  # membership follows
+    assert feeds[second["feed_id"]]["group"] is None
+
+    # the slash name survives a rename and a delete through the query
+    # parameter, which is why names never sit in the path
+    client.patch(f"/api/catalogue/{second['feed_id']}", json={"group": "a/b"})
+    assert client.patch(
+        "/api/catalogue/groups", json={"name": "a/b", "new_name": "c/d"}
+    ).json()["groups"] == ["Helsinki area", "c/d"]
+    # renaming onto an existing name is refused
+    assert (
+        client.patch(
+            "/api/catalogue/groups", json={"name": "c/d", "new_name": "Helsinki area"}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.delete("/api/catalogue/groups", params={"name": "c/d"}).status_code
+        == 200
+    )
+
+    removed = client.delete("/api/catalogue/groups", params={"name": "Helsinki area"})
+    assert removed.json()["groups"] == []
+    body = client.get("/api/catalogue").json()
+    assert body["groups"] == []
+    # the feed outlives its group, ungrouped
+    assert len(body["feeds"]) == 2
+    assert all(feed["group"] is None for feed in body["feeds"])
+
+
+def test_catalogue_group_errors(editor):
+    client = TestClient(create_app(editor))
+    feed_id = client.get("/api/catalogue").json()["feeds"][0]["feed_id"]
+    client.post("/api/catalogue/groups", json={"name": "Group"})
+
+    for body in (
+        {},
+        {"name": ""},
+        {"name": "  "},
+        {"name": 5},
+        {"name": "x" * 61},
+    ):
+        assert client.post("/api/catalogue/groups", json=body).status_code == 422
+    # a lone surrogate arrives as a JSON escape (it cannot be encoded as
+    # UTF-8) and would break every later catalogue response if stored
+    assert (
+        client.post(
+            "/api/catalogue/groups",
+            content=r'{"name": "bad\ud800"}',
+            headers={"content-type": "application/json"},
+        ).status_code
+        == 422
+    )
+    # duplicates are refused rather than silently merged
+    assert (
+        client.post("/api/catalogue/groups", json={"name": "Group"}).status_code == 422
+    )
+    assert (
+        client.patch(
+            "/api/catalogue/groups", json={"name": "nope", "new_name": "x"}
+        ).status_code
+        == 404
+    )
+    assert (
+        client.patch(
+            "/api/catalogue/groups", json={"name": "Group", "new_name": " "}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.delete("/api/catalogue/groups", params={"name": "nope"}).status_code
+        == 404
+    )
+    # an unknown group on a feed is refused, so a typo cannot hide a feed
+    assert (
+        client.patch(f"/api/catalogue/{feed_id}", json={"group": "typo"}).status_code
+        == 422
+    )
+    assert (
+        client.patch(f"/api/catalogue/{feed_id}", json={"group": None}).status_code
+        == 200
+    )
+
+
 def test_catalogue_rejects_malformed_inputs(editor):
     client = TestClient(create_app(editor))
     assert client.post("/api/catalogue", json={"path": ["a", "b"]}).status_code == 422

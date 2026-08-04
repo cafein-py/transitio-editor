@@ -105,6 +105,18 @@ _RESERVED_NAMES = frozenset(
 )
 
 
+def _group_name(value):
+    """A usable group name from a request field, or None."""
+    if not isinstance(value, str):
+        return None
+    name = value.strip()
+    if not name or len(name) > 60:
+        return None
+    # a lone surrogate would break the JSON response — and every later
+    # catalogue response, once stored
+    return name if _json_safe_name(name) else None
+
+
 def _feed_filename(name):
     """A safe ``.zip`` filename from a feed's display name."""
     stem = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-.")[:60]
@@ -827,7 +839,43 @@ def create_app(
             return {
                 "feeds": [entry_dict(entry, registry) for entry in registry.entries()],
                 "current": registry.current,
+                "groups": registry.groups(),
             }
+
+    @app.post("/api/catalogue/groups")
+    def catalogue_group_add(payload: dict = Body(...)):
+        name = _group_name(payload.get("name"))
+        if name is None:
+            raise HTTPException(422, "'name' must be 1-60 non-blank characters")
+        with lock:
+            if registry.has_group(name):
+                raise HTTPException(422, f"group {name!r} already exists")
+            return {"groups": registry.add_group(name)}
+
+    @app.patch("/api/catalogue/groups")
+    def catalogue_group_rename(payload: dict = Body(...)):
+        # Names travel in the body, never the path: a group name is free
+        # text and may contain a slash.
+        name = payload.get("name")
+        new_name = _group_name(payload.get("new_name"))
+        if new_name is None:
+            raise HTTPException(422, "'new_name' must be 1-60 non-blank characters")
+        with lock:
+            if not isinstance(name, str) or not registry.has_group(name):
+                raise HTTPException(404, f"no group {name!r}")
+            if new_name != name and registry.has_group(new_name):
+                raise HTTPException(422, f"group {new_name!r} already exists")
+            return {"groups": registry.rename_group(name, new_name)}
+
+    @app.delete("/api/catalogue/groups")
+    def catalogue_group_remove(name: str):
+        # a query parameter, not a path segment: a group name may contain
+        # a slash, and DELETE bodies are not carried by every client
+        with lock:
+            if not registry.has_group(name):
+                raise HTTPException(404, f"no group {name!r}")
+            # the feeds outlive their group; they just become ungrouped
+            return {"groups": registry.remove_group(name)}
 
     @app.post("/api/catalogue")
     def catalogue_add(payload: dict = Body(...)):
@@ -933,13 +981,22 @@ def create_app(
             entry = registry.get(feed_id)
             if entry is None:
                 raise HTTPException(404, f"no feed {feed_id}")
+            # validate every field first: a rejected one must not leave
+            # the others already applied
+            if "active" in payload and not isinstance(payload["active"], bool):
+                raise HTTPException(422, "'active' must be a boolean")
+            if "group" in payload and payload["group"] is not None:
+                # never create a group implicitly: a typo would file the
+                # feed somewhere the user cannot see
+                group = payload["group"]
+                if not isinstance(group, str) or not registry.has_group(group):
+                    raise HTTPException(422, f"no group {group!r}")
             if "active" in payload:
-                active = payload["active"]
-                if not isinstance(active, bool):
-                    raise HTTPException(422, "'active' must be a boolean")
-                entry.active = active
+                entry.active = payload["active"]
             if "name" in payload:
                 entry.name = str(payload["name"])
+            if "group" in payload:
+                entry.group = payload["group"]
             return entry_dict(entry, registry)
 
     @app.delete("/api/catalogue/{feed_id:path}")
