@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Path boxes have a "Browse…" button: the Data tab's load-feed box browses
+  to a feed archive (the folder browser now lists `.zip` files alongside
+  directories), and the merge form has a box for the folder to write the
+  merged feed into. One browser serves every path box.
+- Merging can write the merged feed straight to a folder (`directory` on
+  `POST /api/catalogue/merge`): the file is named after the feed and
+  becomes the entry's source, so saving later goes back to it.
 - Selection halos are about twice as wide, so the amber band around a
   selected stop, shape or network feature is visible at a glance.
 - The editor opens on the Search tab when it was launched without a feed,

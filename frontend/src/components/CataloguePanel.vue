@@ -6,12 +6,14 @@ import { feedModes, feedTableSummary } from "../catalogue.js";
 import {
   addFeed,
   mergeSelected,
+  openBrowser,
   removeFeed,
   setCurrentFeed,
   toggleFeedActive,
   toggleMergeSelected,
   toggleNetworkVisible,
 } from "../actions.js";
+import FileBrowser from "./FileBrowser.vue";
 
 const osmName = computed(() => {
   const source = store.network.source;
@@ -111,18 +113,37 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
       </span>
     </div>
 
-    <form v-if="canMerge" class="add-feed" @submit.prevent="mergeSelected">
+    <form v-if="canMerge" class="merge-form" @submit.prevent="mergeSelected">
       <input v-model="store.merge.name" placeholder="name for the merged feed" />
+      <div class="dir-row">
+        <input
+          v-model="store.merge.directory"
+          placeholder="folder to save it in (optional)"
+        />
+        <button
+          type="button"
+          @click="openBrowser('mergeDir', 'dir', store.merge.directory.trim() || null)"
+        >
+          Browse…
+        </button>
+      </div>
+      <FileBrowser target="mergeDir" />
       <button class="primary" type="submit" :disabled="store.merge.merging">
         {{ store.merge.merging ? "Merging…" : `Merge ${store.merge.selected.length} feeds` }}
       </button>
     </form>
 
     <form class="add-feed" @submit.prevent="addFeed">
-      <input
-        v-model="store.newFeedPath"
-        placeholder="path to a GTFS feed (zip or directory)"
-      />
+      <div class="dir-row">
+        <input v-model="store.newFeedPath" placeholder="path to a GTFS feed (.zip)" />
+        <button
+          type="button"
+          @click="openBrowser('feedPath', 'feed', store.newFeedPath.trim() || null)"
+        >
+          Browse…
+        </button>
+      </div>
+      <FileBrowser target="feedPath" />
       <button class="primary" type="submit" :disabled="!store.newFeedPath.trim()">
         Load feed
       </button>

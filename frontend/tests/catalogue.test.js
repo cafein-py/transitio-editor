@@ -57,6 +57,15 @@ describe("mergeStatus", () => {
       'merged into "Combined" — feed_info.txt, translations.txt not carried over',
     );
   });
+
+  it("names the file it was saved to", () => {
+    expect(mergeStatus("Combined", [], "/data/Combined.zip")).toBe(
+      'merged into "Combined", saved to /data/Combined.zip',
+    );
+    expect(mergeStatus("Combined", ["feed_info.txt"], "/data/Combined.zip")).toBe(
+      'merged into "Combined", saved to /data/Combined.zip — feed_info.txt not carried over',
+    );
+  });
 });
 
 describe("feedModes", () => {

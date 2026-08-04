@@ -67,7 +67,7 @@ table.times input { width: 76px; padding: 3px; }
 .kind-badge.osm { background: #7a4fbf; }
 .osm-row { display: flex; align-items: center; gap: 5px; margin-top: 8px; padding: 3px 4px; font-size: 12px; border-top: 1px solid #eee; }
 .osm-row .feed-tables { color: #666; font-size: 11px; }
-.add-feed { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.add-feed, .merge-form { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #555; }
 .check input { width: auto; }
 .search-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
@@ -88,6 +88,7 @@ table.times input { width: 76px; padding: 3px; }
 .dir-browser .dir-list { list-style: none; margin: 0 0 6px; padding: 0; max-height: 160px; overflow-y: auto; }
 .dir-browser .dir-list button { display: block; width: 100%; text-align: left; border: 0; padding: 2px 4px; background: none; }
 .dir-browser .dir-list button:hover { background: #f0eee9; }
+.dir-browser .dir-list .feed-entry { color: #35507a; font-weight: 600; }
 .search code { background: #eee; padding: 0 3px; border-radius: 3px; }
 .search-area { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 4px 0; }
 .search-area select { font-size: 12px; }

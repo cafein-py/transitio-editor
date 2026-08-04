@@ -627,9 +627,11 @@ export async function mergeSelected() {
   if (merge.selected.length < 2 || merge.merging) return;
   merge.merging = true;
   try {
+    const directory = merge.directory.trim();
     const body = await api("POST", "/api/catalogue/merge", {
       feed_ids: [...merge.selected],
       name: merge.name.trim(),
+      ...(directory ? { directory } : {}),
     });
     // The merge makes the new feed current, so old feed-scoped state goes.
     resetFeedScopedState();
@@ -638,7 +640,7 @@ export async function mergeSelected() {
     await loadCatalogue();
     await mapBridge.refreshAll(false);
     await mapBridge.refreshSummary();
-    store.status = mergeStatus(body.name, body.dropped_files);
+    store.status = mergeStatus(body.name, body.dropped_files, body.saved);
   } catch (error) {
     store.status = error.message;
   } finally {
@@ -718,33 +720,69 @@ export async function downloadFeed(feed) {
   }
 }
 
-// Server-side folder browser for the download directory (a web page cannot
-// read absolute paths from a native picker; the loopback backend can).
-export async function openDirBrowser(path) {
-  const browse = store.search.browse;
+// Server-side file browser behind every path box (a web page cannot read
+// absolute paths from a native picker; the loopback backend can). `target`
+// names the field a choice lands in, `mode` whether feeds are pickable.
+export async function openBrowser(target, mode, path) {
+  // Clear the old listing: entries from the previous target must not be
+  // clickable under the new one while its listing is on the way.
+  Object.assign(store.browse, {
+    target,
+    mode,
+    path: "",
+    parent: null,
+    dirs: [],
+    feeds: [],
+    error: "",
+  });
+  await browseTo(path);
+}
+
+// Listings can land out of order; only the newest one may paint (and a
+// cancel invalidates every one in flight, so none reopens the browser).
+let browseSeq = 0;
+
+export async function browseTo(path) {
+  const browse = store.browse;
   const query = path ? `?path=${encodeURIComponent(path)}` : "";
+  const seq = ++browseSeq;
   try {
     const listing = await api("GET", `/api/fs/dirs${query}`);
+    if (seq !== browseSeq) return;
     Object.assign(browse, {
       open: true,
       path: listing.path,
       parent: listing.parent,
       dirs: listing.dirs,
+      feeds: listing.feeds || [],
       error: "",
     });
   } catch (error) {
+    if (seq !== browseSeq) return;
     browse.open = true;
     browse.error = error.message;
   }
 }
 
-export function closeDirBrowser() {
-  store.search.browse.open = false;
+export function closeBrowser() {
+  browseSeq += 1; // pending listings must not reopen it
+  store.browse.open = false;
+}
+
+function applyBrowseChoice(value) {
+  const { target } = store.browse;
+  if (target === "downloadDir") store.search.downloadDir = value;
+  else if (target === "feedPath") store.newFeedPath = value;
+  else if (target === "mergeDir") store.merge.directory = value;
+  closeBrowser(); // a pending listing must not reopen it over the choice
 }
 
 export function chooseBrowsedDir() {
-  store.search.downloadDir = store.search.browse.path;
-  store.search.browse.open = false;
+  applyBrowseChoice(store.browse.path);
+}
+
+export function chooseBrowsedFeed(name) {
+  applyBrowseChoice(`${store.browse.path}/${name}`);
 }
 
 export function toggleFeedSelected(feedId) {

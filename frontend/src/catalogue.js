@@ -29,10 +29,13 @@ export function initialTab(catalogue) {
   return catalogue && catalogue.length ? "view" : "search";
 }
 
-// The status line after a merge; files the merge could not carry over
-// are named so the loss is visible.
-export function mergeStatus(name, droppedFiles) {
+// The status line after a merge: where it went (when saved) and any files
+// the merge could not carry over, so the loss is visible.
+export function mergeStatus(name, droppedFiles, savedPath) {
   const dropped = droppedFiles || [];
-  if (!dropped.length) return `merged into "${name}"`;
-  return `merged into "${name}" — ${dropped.join(", ")} not carried over`;
+  const head = savedPath
+    ? `merged into "${name}", saved to ${savedPath}`
+    : `merged into "${name}"`;
+  if (!dropped.length) return head;
+  return `${head} — ${dropped.join(", ")} not carried over`;
 }
