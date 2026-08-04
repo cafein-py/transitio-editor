@@ -2,7 +2,7 @@
 // and/or calls the API, then refreshes the map. `wrap` funnels errors to
 // the status line and marks the validation report stale.
 import { api } from "./api.js";
-import { mergeStatus } from "./catalogue.js";
+import { mergeStatus, moveFeedToGroup } from "./catalogue.js";
 import * as mapBridge from "./map.js";
 import { MODES, UNKNOWN_MODE } from "./modes.js";
 import { isDownloaded } from "./search.js";
@@ -213,7 +213,11 @@ export async function acquireOsm(discardEdits = false) {
   // discarded by the swap; confirm rather than dropping it silently.
   const hasDraft = net.draw.length > 0 || net.movingNode != null;
   if (hasDraft && !discardEdits) {
-    if (!window.confirm("Discard the in-progress drawing and acquire a new extract?"))
+    if (
+      !window.confirm(
+        "Discard the in-progress drawing and acquire a new extract?",
+      )
+    )
       return;
   }
   acquire.downloading = true;
@@ -233,7 +237,11 @@ export async function acquireOsm(discardEdits = false) {
       /unsaved network edits/.test(error.message)
     ) {
       acquire.downloading = false;
-      if (window.confirm("Discard unsaved network edits and load the new extract?")) {
+      if (
+        window.confirm(
+          "Discard unsaved network edits and load the new extract?",
+        )
+      ) {
         return acquireOsm(true);
       }
       return;
@@ -295,7 +303,9 @@ export function toggleModeHidden(code) {
 }
 
 export function setAllModesHidden(hidden) {
-  const codes = hidden ? [...MODES.map((mode) => mode.code), UNKNOWN_MODE.code] : [];
+  const codes = hidden
+    ? [...MODES.map((mode) => mode.code), UNKNOWN_MODE.code]
+    : [];
   store.hiddenModes.splice(0, store.hiddenModes.length, ...codes);
   mapBridge.setHiddenModes([...store.hiddenModes]);
 }
@@ -409,9 +419,13 @@ export const finishShape = wrap(async () => {
 });
 
 export const updateInspectedStop = wrap(async () => {
-  await api("PATCH", `/api/stops/${encodeURIComponent(store.inspector.stopId)}`, {
-    stop_name: store.inspector.name,
-  });
+  await api(
+    "PATCH",
+    `/api/stops/${encodeURIComponent(store.inspector.stopId)}`,
+    {
+      stop_name: store.inspector.name,
+    },
+  );
   await mapBridge.refreshAll(false);
 });
 
@@ -490,7 +504,10 @@ export async function loadTrips() {
 
 export async function loadTrip(tripId) {
   try {
-    store.trip = await api("GET", `/api/trips/${encodeURIComponent(tripId)}/times`);
+    store.trip = await api(
+      "GET",
+      `/api/trips/${encodeURIComponent(tripId)}/times`,
+    );
   } catch (error) {
     store.status = error.message;
   }
@@ -504,9 +521,13 @@ export const applyTripTimes = wrap(async () => {
       departure_time: row.departure_time,
     };
   }
-  await api("PUT", `/api/trips/${encodeURIComponent(store.trip.trip_id)}/times`, {
-    times: updates,
-  });
+  await api(
+    "PUT",
+    `/api/trips/${encodeURIComponent(store.trip.trip_id)}/times`,
+    {
+      times: updates,
+    },
+  );
   await loadTrip(store.trip.trip_id);
 });
 
@@ -518,20 +539,117 @@ export const deleteTrip = wrap(async () => {
 });
 
 export const shiftTrip = wrap(async () => {
-  await api("POST", `/api/trips/${encodeURIComponent(store.trip.trip_id)}/shift`, {
-    seconds: store.shiftSeconds,
-  });
+  await api(
+    "POST",
+    `/api/trips/${encodeURIComponent(store.trip.trip_id)}/shift`,
+    {
+      seconds: store.shiftSeconds,
+    },
+  );
   await loadTrip(store.trip.trip_id);
 });
 
+// Overlapping reloads (a drop while another mutation settles) must not
+// let an older listing paint over a newer one.
+let catalogueSeq = 0;
+
 export async function loadCatalogue() {
+  const seq = ++catalogueSeq;
   try {
     const body = await api("GET", "/api/catalogue");
+    if (seq !== catalogueSeq) return;
     store.catalogue = body.feeds;
+    store.groups = body.groups || [];
     store.currentFeedId = body.current;
+  } catch (error) {
+    if (seq !== catalogueSeq) return;
+    store.status = error.message;
+  }
+}
+
+// Every group mutation re-reads the catalogue rather than assigning the
+// response directly: loadCatalogue is the one guarded writer, so an
+// older in-flight listing cannot paint over the change.
+export async function createGroup() {
+  const name = store.newGroupName.trim();
+  if (!name) return;
+  try {
+    await api("POST", "/api/catalogue/groups", { name });
+    store.newGroupName = "";
+    store.status = "";
+    await loadCatalogue();
   } catch (error) {
     store.status = error.message;
   }
+}
+
+export async function renameGroup(name, newName) {
+  const target = (newName || "").trim();
+  if (!target || target === name) return;
+  try {
+    await api("PATCH", "/api/catalogue/groups", { name, new_name: target });
+    await loadCatalogue();
+  } catch (error) {
+    store.status = error.message;
+  }
+}
+
+export async function deleteGroup(name) {
+  try {
+    await api(
+      "DELETE",
+      `/api/catalogue/groups?name=${encodeURIComponent(name)}`,
+    );
+    await loadCatalogue();
+  } catch (error) {
+    store.status = error.message;
+  }
+}
+
+// Drag and drop between group sections; the pure part is moveFeedToGroup.
+export function startFeedDrag(feed) {
+  store.draggingFeedId = feed.feed_id;
+}
+
+export function endFeedDrag() {
+  store.draggingFeedId = null;
+}
+
+// Drops are applied one at a time, in the order they happened: parallel
+// PATCHes could otherwise land out of order and file a feed in the group
+// it was dragged out of. `requested` holds each feed's latest requested
+// group so a quick drag-back is not read as a no-op against the
+// not-yet-reloaded catalogue.
+let dropQueue = Promise.resolve();
+const requested = new Map();
+
+export async function dropFeedInGroup(group) {
+  const feed = store.catalogue.find(
+    (entry) => entry.feed_id === store.draggingFeedId,
+  );
+  store.draggingFeedId = null;
+  if (!feed) return;
+  const pending = requested.has(feed.feed_id)
+    ? { ...feed, group: requested.get(feed.feed_id) }
+    : feed;
+  const move = moveFeedToGroup(pending, group);
+  if (!move) return;
+  requested.set(move.feed_id, move.group);
+  dropQueue = dropQueue.then(async () => {
+    try {
+      await api("PATCH", `/api/catalogue/${encodeURIComponent(move.feed_id)}`, {
+        group: move.group,
+      });
+      await loadCatalogue();
+    } catch (error) {
+      store.status = error.message;
+    } finally {
+      if (requested.get(move.feed_id) === move.group) {
+        requested.delete(move.feed_id);
+      }
+    }
+  });
+  await dropQueue;
 }
 
 export async function addFeed() {
@@ -657,7 +775,8 @@ export async function runSearch() {
     const params = new URLSearchParams();
     if (s.country.trim()) params.set("country", s.country.trim());
     if (s.subdivision.trim()) params.set("subdivision", s.subdivision.trim());
-    if (s.municipality.trim()) params.set("municipality", s.municipality.trim());
+    if (s.municipality.trim())
+      params.set("municipality", s.municipality.trim());
     if (s.officialOnly) params.set("official", "true");
     const bbox = searchAoiBbox();
     if (bbox) params.set("bbox", bbox.join(","));
@@ -667,7 +786,9 @@ export async function runSearch() {
     s.csvFallback = body.csv_fallback;
     // Don't silently drop a requested area filter.
     store.status =
-      s.aoiMode !== "none" && !bbox ? "no area available — searched everywhere" : "";
+      s.aoiMode !== "none" && !bbox
+        ? "no area available — searched everywhere"
+        : "";
   } catch (error) {
     s.results = [];
     store.status = error.message;

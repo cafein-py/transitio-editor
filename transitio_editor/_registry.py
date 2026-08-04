@@ -25,12 +25,16 @@ _PALETTE = [
 class FeedEntry:
     """One loaded feed and its display state."""
 
-    def __init__(self, feed_id, editor, name, color, source=None, origin=None):
+    def __init__(
+        self, feed_id, editor, name, color, source=None, origin=None, group=None
+    ):
         self.feed_id = feed_id
         self.editor = editor
         self.name = name
         self.color = color
         self.source = source
+        # The user-named group this feed is filed under, or None.
+        self.group = group
         # The Mobility Database feed id this entry was downloaded from (None
         # for locally loaded feeds); lets the search list mark downloaded ones.
         self.origin = origin
@@ -44,16 +48,47 @@ class FeedRegistry:
         self._feeds = {}
         self.current = None
         self._counter = 0
+        # Group names in creation order; a group can exist while empty.
+        self._groups = []
 
-    def add(self, editor, name, source=None, origin=None):
+    def add(self, editor, name, source=None, origin=None, group=None):
         self._counter += 1
         feed_id = f"feed-{self._counter}"
         color = _PALETTE[(self._counter - 1) % len(_PALETTE)]
-        entry = FeedEntry(feed_id, editor, name, color, source, origin)
+        entry = FeedEntry(feed_id, editor, name, color, source, origin, group)
         self._feeds[feed_id] = entry
         if self.current is None:
             self.current = feed_id
         return entry
+
+    # -- groups -----------------------------------------------------------
+
+    def groups(self):
+        return list(self._groups)
+
+    def has_group(self, name):
+        return name in self._groups
+
+    def add_group(self, name):
+        if name not in self._groups:
+            self._groups.append(name)
+        return self.groups()
+
+    def rename_group(self, name, new_name):
+        index = self._groups.index(name)
+        self._groups[index] = new_name
+        for entry in self._feeds.values():
+            if entry.group == name:
+                entry.group = new_name
+        return self.groups()
+
+    def remove_group(self, name):
+        """Drop a group, leaving its feeds ungrouped."""
+        self._groups.remove(name)
+        for entry in self._feeds.values():
+            if entry.group == name:
+                entry.group = None
+        return self.groups()
 
     def get(self, feed_id):
         return self._feeds.get(feed_id)
@@ -142,6 +177,7 @@ def entry_dict(entry, registry):
         "current": registry.current == entry.feed_id,
         "source": entry.source,
         "origin": entry.origin,
+        "group": entry.group,
         "modes": _feed_modes(entry.editor),
         "tables": {
             name: len(table) for name, table in sorted(entry.editor.tables.items())

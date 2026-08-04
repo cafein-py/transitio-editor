@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+- Feed groups in the Data tab: name a group, then drag feeds into and out
+  of it. Groups are display-only — they do not change which feed is
+  current, which are active or how the map draws — and removing a group
+  leaves its feeds in the catalogue, ungrouped. Backed by
+  ``POST``/``PATCH``/``DELETE /api/catalogue/groups`` and a ``group``
+  field on each catalogue entry.
+
 ### Changed
 
 - Path boxes have a "Browse…" button: the Data tab's load-feed box browses

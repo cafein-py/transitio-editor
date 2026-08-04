@@ -1,18 +1,19 @@
 <script setup>
-import { computed } from "vue";
+import { computed, ref } from "vue";
 
 import { store } from "../store.js";
-import { feedModes, feedTableSummary } from "../catalogue.js";
+import { groupedCatalogue } from "../catalogue.js";
 import {
   addFeed,
+  createGroup,
+  deleteGroup,
+  dropFeedInGroup,
   mergeSelected,
   openBrowser,
-  removeFeed,
-  setCurrentFeed,
-  toggleFeedActive,
-  toggleMergeSelected,
+  renameGroup,
   toggleNetworkVisible,
 } from "../actions.js";
+import FeedRow from "./FeedRow.vue";
 import FileBrowser from "./FileBrowser.vue";
 
 const osmName = computed(() => {
@@ -21,6 +22,22 @@ const osmName = computed(() => {
 });
 
 const canMerge = computed(() => store.merge.selected.length >= 2);
+const grouped = computed(() => groupedCatalogue(store.catalogue, store.groups));
+
+// The group whose name is being edited, and its draft name.
+const editing = ref(null);
+const draft = ref("");
+
+function startRename(name) {
+  editing.value = name;
+  draft.value = name;
+}
+
+async function commitRename(name) {
+  const value = draft.value;
+  editing.value = null;
+  await renameGroup(name, value);
+}
 </script>
 
 <template>
@@ -29,7 +46,10 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
       Activate the feeds to show together on the map; the current feed is the
       target of edits, validation and save.
     </p>
-    <table v-if="store.catalogue.length" class="catalogue-table">
+    <table
+      v-if="store.catalogue.length || store.groups.length"
+      class="catalogue-table"
+    >
       <thead>
         <tr>
           <th title="shown on map">show</th>
@@ -39,63 +59,73 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
           <th></th>
         </tr>
       </thead>
-      <tbody>
-        <tr
-          v-for="feed in store.catalogue"
-          :key="feed.feed_id"
-          :class="{ current: feed.current }"
-        >
-          <td>
-            <input
-              type="checkbox"
-              :checked="feed.active"
-              @change="toggleFeedActive(feed)"
-            />
-          </td>
-          <td>
-            <span class="swatch" :style="{ background: feed.color }"></span>
-            <span class="kind-badge gtfs">GTFS</span>
-            <span class="feed-name">{{ feed.name }}</span>
-            <span class="feed-tables">{{ feedTableSummary(feed.tables) }}</span>
-            <span v-if="feedModes(feed.modes).length" class="feed-modes">
-              <span
-                v-for="mode in feedModes(feed.modes)"
-                :key="mode.code"
-                class="mode-chip"
+      <!-- One tbody per group, so dropping anywhere in a group's block
+           files the feed there; columns stay aligned across groups. -->
+      <tbody
+        v-for="section in grouped.sections"
+        :key="section.name"
+        class="feed-group"
+        @dragover.prevent
+        @drop.prevent="dropFeedInGroup(section.name)"
+      >
+        <tr class="group-heading">
+          <td colspan="5">
+            <template v-if="editing === section.name">
+              <input
+                v-model="draft"
+                class="group-rename"
+                @keyup.enter="commitRename(section.name)"
+                @keyup.escape="editing = null"
+              />
+              <button type="button" @click="commitRename(section.name)">
+                Save
+              </button>
+              <button type="button" @click="editing = null">Cancel</button>
+            </template>
+            <template v-else>
+              <span class="group-name">{{ section.name }}</span>
+              <span class="feed-tables">{{ section.feeds.length }} feeds</span>
+              <button type="button" @click="startRename(section.name)">
+                Rename
+              </button>
+              <button
+                type="button"
+                title="remove the group; its feeds stay"
+                @click="deleteGroup(section.name)"
               >
-                <span class="swatch" :style="{ background: mode.color }"></span
-                >{{ mode.label }}
-              </span>
-            </span>
-          </td>
-          <td>
-            <input
-              type="radio"
-              name="current-feed"
-              :checked="feed.current"
-              @change="setCurrentFeed(feed)"
-            />
-          </td>
-          <td>
-            <input
-              type="checkbox"
-              :checked="store.merge.selected.includes(feed.feed_id)"
-              @change="toggleMergeSelected(feed)"
-            />
-          </td>
-          <td>
-            <button
-              class="remove"
-              title="remove from catalogue"
-              @click="removeFeed(feed)"
-            >
-              ×
-            </button>
+                Ungroup
+              </button>
+            </template>
           </td>
         </tr>
+        <FeedRow
+          v-for="feed in section.feeds"
+          :key="feed.feed_id"
+          :feed="feed"
+        />
+        <tr v-if="!section.feeds.length" class="group-empty">
+          <td colspan="5">drag feeds here</td>
+        </tr>
+      </tbody>
+      <tbody
+        class="feed-group ungrouped"
+        @dragover.prevent
+        @drop.prevent="dropFeedInGroup(null)"
+      >
+        <tr v-if="grouped.sections.length" class="group-heading">
+          <td colspan="5"><span class="group-name">ungrouped</span></td>
+        </tr>
+        <FeedRow
+          v-for="feed in grouped.ungrouped"
+          :key="feed.feed_id"
+          :feed="feed"
+        />
       </tbody>
     </table>
     <p v-else class="hint">no feeds loaded.</p>
+    <p v-if="!store.catalogue.length && store.groups.length" class="hint">
+      no feeds loaded.
+    </p>
 
     <!-- The one OSM extract loads via the Network tab or --osm-pbf; it lists
          here so all loaded data is visible in one place. -->
@@ -114,7 +144,10 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
     </div>
 
     <form v-if="canMerge" class="merge-form" @submit.prevent="mergeSelected">
-      <input v-model="store.merge.name" placeholder="name for the merged feed" />
+      <input
+        v-model="store.merge.name"
+        placeholder="name for the merged feed"
+      />
       <div class="dir-row">
         <input
           v-model="store.merge.directory"
@@ -122,29 +155,53 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
         />
         <button
           type="button"
-          @click="openBrowser('mergeDir', 'dir', store.merge.directory.trim() || null)"
+          @click="
+            openBrowser('mergeDir', 'dir', store.merge.directory.trim() || null)
+          "
         >
           Browse…
         </button>
       </div>
       <FileBrowser target="mergeDir" />
       <button class="primary" type="submit" :disabled="store.merge.merging">
-        {{ store.merge.merging ? "Merging…" : `Merge ${store.merge.selected.length} feeds` }}
+        {{
+          store.merge.merging
+            ? "Merging…"
+            : `Merge ${store.merge.selected.length} feeds`
+        }}
       </button>
+    </form>
+
+    <form class="add-feed" @submit.prevent="createGroup">
+      <div class="dir-row">
+        <input v-model="store.newGroupName" placeholder="new group name" />
+        <button type="submit" :disabled="!store.newGroupName.trim()">
+          Add group
+        </button>
+      </div>
     </form>
 
     <form class="add-feed" @submit.prevent="addFeed">
       <div class="dir-row">
-        <input v-model="store.newFeedPath" placeholder="path to a GTFS feed (.zip)" />
+        <input
+          v-model="store.newFeedPath"
+          placeholder="path to a GTFS feed (.zip)"
+        />
         <button
           type="button"
-          @click="openBrowser('feedPath', 'feed', store.newFeedPath.trim() || null)"
+          @click="
+            openBrowser('feedPath', 'feed', store.newFeedPath.trim() || null)
+          "
         >
           Browse…
         </button>
       </div>
       <FileBrowser target="feedPath" />
-      <button class="primary" type="submit" :disabled="!store.newFeedPath.trim()">
+      <button
+        class="primary"
+        type="submit"
+        :disabled="!store.newFeedPath.trim()"
+      >
         Load feed
       </button>
     </form>
