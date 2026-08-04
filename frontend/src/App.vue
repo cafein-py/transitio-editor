@@ -18,6 +18,7 @@ import CurrentFeedBar from "./components/CurrentFeedBar.vue";
 import NetworkPanel from "./components/NetworkPanel.vue";
 import SearchPanel from "./components/SearchPanel.vue";
 import FeedSummary from "./components/FeedSummary.vue";
+import BasemapControl from "./components/BasemapControl.vue";
 import MapToolbar from "./components/MapToolbar.vue";
 import RouteForm from "./components/RouteForm.vue";
 import RouteLegend from "./components/RouteLegend.vue";
@@ -82,6 +83,7 @@ onMounted(async () => {
     <div id="map-wrap">
       <div id="map"></div>
       <MapToolbar />
+      <BasemapControl />
       <button
         v-if="store.activeTab === 'view'"
         class="table-toggle"
