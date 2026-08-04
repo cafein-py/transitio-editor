@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+
+- The Search tab is one search box: type a place ("Helsinki", "New York")
+  and the map flies there while the feeds serving that area are listed —
+  the place is geocoded (Nominatim, the same geocoder the OSM acquire
+  flow uses) and drives a bounding-box feed search, with tiny places
+  padded to a searchable area. The country/subdivision/municipality
+  fields are gone; an empty box still searches the current map view or a
+  drawn area, and the official-only, crop and download-folder options are
+  unchanged (`q` on `GET /api/search`, which reports the geocoded
+  `place` back).
+
 ### Added
 
 - ``transitio-editor`` opens the GUI in the default browser once the

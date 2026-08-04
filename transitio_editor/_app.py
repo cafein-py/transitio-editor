@@ -194,6 +194,49 @@ def _crop_area(shape):
     return None
 
 
+def _geocode_bounds(query):
+    """The WGS84 bounds of a geocoded place name.
+
+    Nominatim via pyrosm — the same geocoder the OSM acquire flow uses,
+    so "Helsinki" means the same thing in both.
+    """
+    from transitio.osm._fetch import _as_geometry
+
+    return _as_geometry(query).bounds
+
+
+def _padded_span(low, high, minimum, bound_low, bound_high):
+    """``[low, high]`` widened to ``minimum``, shifted to stay in bounds.
+
+    Shifting (rather than clamping the padded edges) keeps the minimum
+    extent even for a place sitting on a WGS84 boundary.
+    """
+    if high - low < minimum:
+        pad = (minimum - (high - low)) / 2
+        low -= pad
+        high += pad
+    if low < bound_low:
+        high += bound_low - low
+        low = bound_low
+    if high > bound_high:
+        low -= high - bound_high
+        high = bound_high
+    return max(bound_low, low), high
+
+
+def _place_bbox(query):
+    """A searchable bounding box for a place name.
+
+    A place that geocodes to a point (or a sliver) is padded to a
+    minimal extent, so a bbox-overlap feed search has an area to work
+    with instead of a zero-area box nothing overlaps.
+    """
+    minx, miny, maxx, maxy = _geocode_bounds(query)
+    minx, maxx = _padded_span(minx, maxx, 0.1, -180.0, 180.0)
+    miny, maxy = _padded_span(miny, maxy, 0.05, -90.0, 90.0)
+    return (minx, miny, maxx, maxy)
+
+
 def _feed_filename(name):
     """A safe ``.zip`` filename from a feed's display name."""
     stem = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-.")[:60]
@@ -1249,6 +1292,7 @@ def create_app(
 
     @app.get("/api/search")
     def search(
+        q: str | None = None,
         country: str | None = None,
         subdivision: str | None = None,
         municipality: str | None = None,
@@ -1256,7 +1300,21 @@ def create_app(
         official: bool = False,
         limit: int = 50,
     ):
-        aoi = _parse_bbox(bbox) if bbox else None
+        place = None
+        query = (q or "").strip()
+        if query:
+            # A typed place decides the area: geocode it and search the
+            # feeds overlapping it, whatever the other area inputs say
+            # (a stale bbox is ignored entirely, not validated).
+            try:
+                place = _place_bbox(query)
+            except Exception as error:  # noqa: B902  (geocoder, no match)
+                raise HTTPException(
+                    422, f"cannot find place {query!r}: {error}"
+                ) from None
+            aoi = place
+        else:
+            aoi = _parse_bbox(bbox) if bbox else None
         client = get_catalog()
         try:
             feeds = client.search_feeds(
@@ -1274,10 +1332,14 @@ def create_app(
         # No refresh token means search_feeds served the CSV export, which
         # lacks historical datasets and hosted validation reports.
         csv_fallback = not getattr(client, "_refresh_token", None)
-        return {
+        result = {
             "feeds": [_feed_result(feed) for feed in feeds],
             "csv_fallback": csv_fallback,
         }
+        if place is not None:
+            # the frontend flies the map to the place the search meant
+            result["place"] = {"query": query, "bbox": list(place)}
+        return result
 
     @app.post("/api/catalogue/download")
     def catalogue_download(payload: dict = Body(...)):

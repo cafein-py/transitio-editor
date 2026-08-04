@@ -105,9 +105,7 @@ export const store = reactive({
     },
   },
   search: {
-    country: "",
-    subdivision: "",
-    municipality: "",
+    q: "", // one box: a place name, geocoded and flown to
     officialOnly: false,
     aoiMode: "none", // search-area source: "none" | "map" | "drawn"
     cropToAoi: false, // crop a downloaded feed to the selected area
