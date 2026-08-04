@@ -53,11 +53,7 @@ import {
       </div>
       <label>
         shift by
-        <input
-          v-model.number="store.shiftSeconds"
-          type="number"
-          class="offset"
-        />
+        <input v-model.number="store.shiftSeconds" type="number" class="offset" />
         s <button @click="shiftTrip">Shift</button>
       </label>
     </div>

@@ -6,9 +6,7 @@ import { loadTable, toggleTableView } from "../actions.js";
 
 const files = computed(() => Object.keys(store.tables));
 const view = computed(() => store.tableView);
-const page = computed(
-  () => Math.floor(view.value.offset / view.value.limit) + 1,
-);
+const page = computed(() => Math.floor(view.value.offset / view.value.limit) + 1);
 const pages = computed(() =>
   Math.max(1, Math.ceil(view.value.total / view.value.limit)),
 );
@@ -65,7 +63,10 @@ function next() {
         <template v-if="pages > 1"> — page {{ page }}/{{ pages }}</template>
       </span>
       <button :disabled="view.offset === 0" @click="previous">‹</button>
-      <button :disabled="view.offset + view.limit >= view.total" @click="next">
+      <button
+        :disabled="view.offset + view.limit >= view.total"
+        @click="next"
+      >
         ›
       </button>
       <button class="table-close" title="close" @click="toggleTableView">

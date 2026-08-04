@@ -20,10 +20,7 @@ import { submitRoute } from "../actions.js";
         <option value="3">bus</option>
         <option value="4">ferry</option>
       </select>
-      <input
-        v-model="forms.route.agency_id"
-        placeholder="agency_id (optional)"
-      />
+      <input v-model="forms.route.agency_id" placeholder="agency_id (optional)" />
       <button>Add route</button>
     </form>
   </details>
