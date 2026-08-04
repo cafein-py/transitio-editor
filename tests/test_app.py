@@ -188,7 +188,8 @@ def test_cli_starts_without_feed(monkeypatch):
 
     served = {}
     monkeypatch.setattr(uvicorn, "run", lambda app, **kw: served.update(app=app))
-    assert main([]) == 0
+    # --no-browser: uvicorn is stubbed here, so nothing would ever answer
+    assert main(["--no-browser"]) == 0
     client = TestClient(served["app"])
     summary = client.get("/api/feed").json()
     assert summary["source"] is None and summary["tables"] == {}
@@ -205,6 +206,176 @@ def test_cli_starts_without_feed(monkeypatch):
         ).status_code
         == 200
     )
+
+
+def test_cli_opens_the_browser(monkeypatch):
+    import uvicorn
+
+    from transitio_editor import cli
+
+    opened = []
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: None)
+    monkeypatch.setattr(
+        cli, "open_when_serving", lambda url, host, port, token: opened.append(url)
+    )
+    assert cli.main([]) == 0
+    assert opened == ["http://127.0.0.1:8300"]
+
+    # ...unless the user asked it not to
+    opened.clear()
+    assert cli.main(["--no-browser"]) == 0
+    assert opened == []
+
+
+def test_wildcard_bind_accepts_the_loopback_url_it_opens(monkeypatch):
+    import uvicorn
+
+    from transitio_editor import cli
+
+    served = {}
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: served.update(app=app))
+    monkeypatch.setattr(cli, "open_when_serving", lambda *a, **kw: None)
+    assert cli.main(["--allow-remote", "--host", "0.0.0.0"]) == 0
+
+    client = TestClient(served["app"])
+    # the browser is pointed at loopback, so the host guard must accept it
+    assert cli.browser_url("0.0.0.0", 8300) == "http://127.0.0.1:8300"
+    for host in ("127.0.0.1:8300", "localhost:8300", "0.0.0.0:8300"):
+        assert client.get("/api/feed", headers={"host": host}).status_code == 200
+    # a foreign name is still refused
+    assert client.get("/api/feed", headers={"host": "evil.example"}).status_code == 400
+
+
+def test_cli_rejects_a_port_the_url_cannot_name():
+    from transitio_editor.cli import main
+
+    for port in ("0", "70000", "-1"):
+        with pytest.raises(SystemExit):
+            main(["--no-browser", "--port", port])
+
+
+def test_browser_url_is_reachable_for_every_bind():
+    from transitio_editor.cli import browser_url
+
+    assert browser_url("127.0.0.1", 8300) == "http://127.0.0.1:8300"
+    # a wildcard bind is not an address a browser can open, in any spelling
+    assert browser_url("0.0.0.0", 8300) == "http://127.0.0.1:8300"
+    assert browser_url("::", 8300) == "http://[::1]:8300"
+    assert browser_url("0:0:0:0:0:0:0:0", 8300) == "http://[::1]:8300"
+    assert browser_url("::1", 9000) == "http://[::1]:9000"  # bracketed
+    assert browser_url("192.168.1.5", 8300) == "http://192.168.1.5:8300"
+
+
+def _serve_json(bodies, delay=0.0):
+    """A throwaway HTTP server answering the given path -> JSON bodies."""
+    import http.server
+    import json
+    import threading
+    import time
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            if self.path in bodies:
+                payload = json.dumps(bodies[self.path]).encode()
+                self.send_response(200)
+                self.send_header("content-type", "application/json")
+                self.end_headers()
+                self.wfile.write(payload)
+            else:
+                self.send_response(404)
+                self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    port = server.server_address[1]
+
+    def run():
+        time.sleep(delay)
+        server.serve_forever(poll_interval=0.05)
+
+    threading.Thread(target=run, daemon=True).start()
+    return server, port
+
+
+def test_browser_opens_only_once_this_editor_answers(monkeypatch):
+    from transitio_editor import cli
+
+    opened = []
+    monkeypatch.setattr(cli.webbrowser, "open", opened.append)
+    # the API only starts answering after a delay: the browser waits
+    server, port = _serve_json({"/api/boot-token": {"token": "tok-1"}}, delay=0.3)
+    try:
+        cli.open_when_serving(
+            f"http://127.0.0.1:{port}", "127.0.0.1", port, "tok-1"
+        ).join()
+        assert opened == [f"http://127.0.0.1:{port}"]
+    finally:
+        server.shutdown()
+
+
+def test_browser_ignores_another_service_on_the_port(monkeypatch):
+    from transitio_editor import cli
+
+    opened = []
+    monkeypatch.setattr(cli.webbrowser, "open", opened.append)
+    # another editor instance already owns the port: it answers the same
+    # endpoint, but with its own token — opening a browser onto it would
+    # show someone else's session while this launch fails to bind
+    server, port = _serve_json({"/api/boot-token": {"token": "someone-else"}})
+    try:
+        cli.open_when_serving(
+            f"http://127.0.0.1:{port}", "127.0.0.1", port, "tok-1", timeout=0.4
+        ).join()
+        assert opened == []
+    finally:
+        server.shutdown()
+
+    # non-object JSON on the endpoint must not crash the poller either
+    weird, weird_port = _serve_json({"/api/boot-token": None})
+    try:
+        cli.open_when_serving(
+            f"http://127.0.0.1:{weird_port}",
+            "127.0.0.1",
+            weird_port,
+            "tok-1",
+            timeout=0.4,
+        ).join()
+        assert opened == []
+    finally:
+        weird.shutdown()
+
+    # a catch-all server without the endpoint is ignored the same way
+    other, other_port = _serve_json({"/": {"hello": "web"}})
+    try:
+        cli.open_when_serving(
+            f"http://127.0.0.1:{other_port}",
+            "127.0.0.1",
+            other_port,
+            "tok-1",
+            timeout=0.4,
+        ).join()
+        assert opened == []
+    finally:
+        other.shutdown()
+
+
+def test_browser_gives_up_quietly_when_nothing_serves(monkeypatch):
+    import socket
+
+    from transitio_editor import cli
+
+    opened = []
+    monkeypatch.setattr(cli.webbrowser, "open", opened.append, raising=False)
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    # the server never comes up: no browser, no exception, no hang
+    cli.open_when_serving(
+        "http://127.0.0.1:1", "127.0.0.1", port, "tok-1", timeout=0.3
+    ).join()
+    assert opened == []
 
 
 def test_full_builder_surface_over_http(tmp_path):

@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- ``transitio-editor`` opens the GUI in the default browser once the
+  server is listening, so the address no longer has to be copied by hand;
+  ``--no-browser`` keeps the old behaviour. A machine without a browser
+  is not an error — the address is still printed.
+
 - Cropping the feeds on the map to a drawn area: in the View/Edit tab's
   editing mode, drag a box or click out a polygon, then confirm in the
   panel below the map. Every feed shown on the map is cropped to the area
