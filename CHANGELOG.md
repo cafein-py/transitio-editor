@@ -5,19 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
-
-### Changed
-
-- The Search tab is one search box: type a place ("Helsinki", "New York")
-  and the map flies there while the feeds serving that area are listed —
-  the place is geocoded (Nominatim, the same geocoder the OSM acquire
-  flow uses) and drives a bounding-box feed search, with tiny places
-  padded to a searchable area. The country/subdivision/municipality
-  fields are gone; an empty box still searches the current map view or a
-  drawn area, and the official-only, crop and download-folder options are
-  unchanged (`q` on `GET /api/search`, which reports the geocoded
-  `place` back).
+## 0.7.0 — 2026-08-04
 
 ### Added
 
@@ -43,32 +31,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   leaves its feeds in the catalogue, ungrouped. Backed by
   ``POST``/``PATCH``/``DELETE /api/catalogue/groups`` and a ``group``
   field on each catalogue entry.
-
-### Changed
-
-- Path boxes have a "Browse…" button: the Data tab's load-feed box browses
-  to a feed archive (the folder browser now lists `.zip` files alongside
-  directories), and the merge form has a box for the folder to write the
-  merged feed into. One browser serves every path box.
-- Merging can write the merged feed straight to a folder (`directory` on
-  `POST /api/catalogue/merge`): the file is named after the feed and
-  becomes the entry's source, so saving later goes back to it.
-- Selection halos are about twice as wide, so the amber band around a
-  selected stop, shape or network feature is visible at a glance.
-- The editor opens on the Search tab when it was launched without a feed,
-  and on View/Edit when a feed was given; removing feeds later never moves
-  the user off the tab they are on.
-
-### Fixed
-
-- ``GET /api/stops``, ``GET /api/shapes`` and the OSM network endpoints no
-  longer fail with ``AttributeError: 'float' object has no attribute
-  '__geo_interface__'`` when a feed carries a stop without coordinates or
-  a shape with fewer than two points. With geopandas 1.x a missing
-  geometry reads back from ``iterrows()`` as NaN rather than ``None``, so
-  the guards that skip such rows never fired.
-
-### Added
 
 - Merging feeds from the Data tab: tick two or more catalogue entries and
   merge them into a single new feed (optionally named), which becomes the
@@ -124,8 +86,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with extended (Google-extension) route types normalised to their base
   families.
 
-### Added
-
 - An attribute table below the map: a floating "Table" button opens a
   panel listing any GTFS file's rows (stops, routes, trips, …) for the
   current feed, with a file selector, a search box filtering across every
@@ -138,6 +98,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dropped (card closed, feed switched, element deleted, network reset).
 
 ### Changed
+
+- The Search tab is one search box: type a place ("Helsinki", "New York")
+  and the map flies there while the feeds serving that area are listed —
+  the place is geocoded (Nominatim, the same geocoder the OSM acquire
+  flow uses) and drives a bounding-box feed search, with tiny places
+  padded to a searchable area. The country/subdivision/municipality
+  fields are gone; an empty box still searches the current map view or a
+  drawn area, and the official-only, crop and download-folder options are
+  unchanged (`q` on `GET /api/search`, which reports the geocoded
+  `place` back).
+
+- Path boxes have a "Browse…" button: the Data tab's load-feed box browses
+  to a feed archive (the folder browser now lists `.zip` files alongside
+  directories), and the merge form has a box for the folder to write the
+  merged feed into. One browser serves every path box.
+- Merging can write the merged feed straight to a folder (`directory` on
+  `POST /api/catalogue/merge`): the file is named after the feed and
+  becomes the entry's source, so saving later goes back to it.
+- Selection halos are about twice as wide, so the amber band around a
+  selected stop, shape or network feature is visible at a glance.
+- The editor opens on the Search tab when it was launched without a feed,
+  and on View/Edit when a feed was given; removing feeds later never moves
+  the user off the tab they are on.
 
 - The View and Edit tabs merge into one View/Edit tab with an "editing
   mode" switch: viewing is the default, and flipping the switch reveals
@@ -162,6 +145,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   suggests using a smaller area.
 
 ### Fixed
+
+- ``GET /api/stops``, ``GET /api/shapes`` and the OSM network endpoints no
+  longer fail with ``AttributeError: 'float' object has no attribute
+  '__geo_interface__'`` when a feed carries a stop without coordinates or
+  a shape with fewer than two points. With geopandas 1.x a missing
+  geometry reads back from ``iterrows()`` as NaN rather than ``None``, so
+  the guards that skip such rows never fired.
 
 - The Catalogue tab's per-feed summary counted stops and routes under the
   wrong table keys and therefore always showed "0 stops, 0 routes"; it now
