@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+
+- ``GET /api/stops``, ``GET /api/shapes`` and the OSM network endpoints no
+  longer fail with ``AttributeError: 'float' object has no attribute
+  '__geo_interface__'`` when a feed carries a stop without coordinates or
+  a shape with fewer than two points. With geopandas 1.x a missing
+  geometry reads back from ``iterrows()`` as NaN rather than ``None``, so
+  the guards that skip such rows never fired.
+
 ### Added
 
 - Merging feeds from the Data tab: tick two or more catalogue entries and

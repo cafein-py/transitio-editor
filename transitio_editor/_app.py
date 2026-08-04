@@ -53,6 +53,16 @@ def _clean_id(value):
     return str(value).strip() if value is not None else ""
 
 
+def _has_geometry(value):
+    """Whether a row's geometry cell holds a real geometry.
+
+    A feed can carry a stop without coordinates or a shape with a single
+    point, which become missing geometries — read back from ``iterrows``
+    as ``None`` or as NaN, depending on the pandas/geopandas versions.
+    """
+    return hasattr(value, "__geo_interface__")
+
+
 def _merge_prefixes(names, feed_ids):
     """Id prefixes for a merge, derived from the feeds' display names.
 
@@ -125,7 +135,7 @@ def _network_features(frame):
     features = []
     for _, row in frame.iterrows():
         geometry = row[geometry_name]
-        if geometry is None:
+        if not _has_geometry(geometry):
             continue
         properties = {}
         for key, value in row.items():
@@ -408,7 +418,7 @@ def create_app(
             name_column = frame.geometry.name
             for _, row in frame.iterrows():
                 geometry = row.geometry
-                if geometry is None:
+                if not _has_geometry(geometry):
                     continue
                 properties = {
                     key: value for key, value in row.items() if key != name_column
@@ -434,7 +444,7 @@ def create_app(
                 continue
             route_types = _shape_route_types(entry.editor)
             for _, row in frame.iterrows():
-                if row.geometry is None:
+                if not _has_geometry(row.geometry):
                     continue
                 properties = {
                     "shape_id": row["shape_id"],
