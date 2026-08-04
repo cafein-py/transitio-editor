@@ -486,6 +486,8 @@ export function createMap() {
 
     // Selection halos: an amber underlay marks the selected feature, in
     // every domain (inserted beneath its feature layer via beforeId).
+    // Each width leaves an amber band about twice the feature's own
+    // half-width visible on either side, so a selection reads at a glance.
     map.addLayer(
       {
         id: "shapes-selected",
@@ -494,7 +496,7 @@ export function createMap() {
         filter: NO_SELECTION,
         paint: {
           "line-color": SELECT_COLOR,
-          "line-width": 9,
+          "line-width": 15,
           "line-opacity": 0.85,
         },
       },
@@ -507,7 +509,7 @@ export function createMap() {
         source: "stops",
         filter: NO_SELECTION,
         paint: {
-          "circle-radius": stopRadius(1.8),
+          "circle-radius": stopRadius(2.6),
           "circle-color": SELECT_COLOR,
           "circle-opacity": 0.9,
         },
@@ -523,7 +525,7 @@ export function createMap() {
         layout: { visibility: "none" },
         paint: {
           "line-color": SELECT_COLOR,
-          "line-width": 6,
+          "line-width": 10.5,
           "line-opacity": 0.85,
         },
       },
@@ -538,7 +540,7 @@ export function createMap() {
         filter: NO_SELECTION,
         layout: { visibility: "none" },
         paint: {
-          "circle-radius": 7,
+          "circle-radius": 10,
           "circle-color": SELECT_COLOR,
           "circle-opacity": 0.9,
         },
