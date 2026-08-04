@@ -30,7 +30,20 @@ export const store = reactive({
   merge: {
     selected: [], // feed ids ticked for merging
     name: "", // optional name for the merged feed
+    directory: "", // optional folder to write the merged feed into
     merging: false,
+  },
+  // The server-side file browser, shared by every path box: `target` names
+  // the field the choice lands in, `mode` whether a feed file can be picked.
+  browse: {
+    open: false,
+    target: null, // "downloadDir" | "feedPath" | "mergeDir"
+    mode: "dir", // "dir" (choose a folder) | "feed" (choose a .zip)
+    path: "",
+    parent: null,
+    dirs: [],
+    feeds: [],
+    error: "",
   },
   snapAvailable: false,
   mode: "select",
@@ -88,7 +101,6 @@ export const store = reactive({
     aoiMode: "none", // search-area source: "none" | "map" | "drawn"
     cropToAoi: false, // crop a downloaded feed to the selected area
     downloadDir: "", // optional folder for downloads (default: the cache)
-    browse: { open: false, path: "", parent: null, dirs: [], error: "" },
     limit: 50,
     results: [],
     searching: false,

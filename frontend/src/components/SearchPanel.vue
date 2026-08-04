@@ -11,15 +11,14 @@ import {
 import {
   clearAoi,
   downloadFeed,
-  chooseBrowsedDir,
-  closeDirBrowser,
   downloadSelected,
-  openDirBrowser,
+  openBrowser,
   runSearch,
   setAllSelected,
   startAoiDraw,
   toggleFeedSelected,
 } from "../actions.js";
+import FileBrowser from "./FileBrowser.vue";
 
 const selectable = computed(() =>
   selectableFeeds(store.search.results, store.catalogue),
@@ -109,41 +108,14 @@ function sortArrow(key) {
         />
         <button
           type="button"
-          @click="openDirBrowser(store.search.downloadDir.trim() || null)"
+          @click="
+            openBrowser('downloadDir', 'dir', store.search.downloadDir.trim() || null)
+          "
         >
           Browse…
         </button>
       </div>
-      <div v-if="store.search.browse.open" class="dir-browser">
-        <div class="dir-path">{{ store.search.browse.path }}</div>
-        <p v-if="store.search.browse.error" class="hint net-error">
-          {{ store.search.browse.error }}
-        </p>
-        <ul class="dir-list">
-          <li v-if="store.search.browse.parent">
-            <button
-              type="button"
-              @click="openDirBrowser(store.search.browse.parent)"
-            >
-              ..
-            </button>
-          </li>
-          <li v-for="name in store.search.browse.dirs" :key="name">
-            <button
-              type="button"
-              @click="openDirBrowser(`${store.search.browse.path}/${name}`)"
-            >
-              {{ name }}/
-            </button>
-          </li>
-        </ul>
-        <div class="mode-row">
-          <button type="button" @click="chooseBrowsedDir">
-            Use this folder
-          </button>
-          <button type="button" @click="closeDirBrowser">Cancel</button>
-        </div>
-      </div>
+      <FileBrowser target="downloadDir" />
       <button class="primary" type="submit" :disabled="store.search.searching">
         {{ store.search.searching ? "Searching…" : "Search" }}
       </button>

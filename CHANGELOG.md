@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+
+- Path boxes have a "Browse…" button: the Data tab's load-feed box browses
+  to a feed archive (the folder browser now lists `.zip` files alongside
+  directories), and the merge form has a box for the folder to write the
+  merged feed into. One browser serves every path box.
+- Merging can write the merged feed straight to a folder (`directory` on
+  `POST /api/catalogue/merge`): the file is named after the feed and
+  becomes the entry's source, so saving later goes back to it.
+- Selection halos are about twice as wide, so the amber band around a
+  selected stop, shape or network feature is visible at a glance.
+- The editor opens on the Search tab when it was launched without a feed,
+  and on View/Edit when a feed was given; removing feeds later never moves
+  the user off the tab they are on.
+
+### Fixed
+
+- ``GET /api/stops``, ``GET /api/shapes`` and the OSM network endpoints no
+  longer fail with ``AttributeError: 'float' object has no attribute
+  '__geo_interface__'`` when a feed carries a stop without coordinates or
+  a shape with fewer than two points. With geopandas 1.x a missing
+  geometry reads back from ``iterrows()`` as NaN rather than ``None``, so
+  the guards that skip such rows never fired.
+
 ### Added
 
 - Merging feeds from the Data tab: tick two or more catalogue entries and

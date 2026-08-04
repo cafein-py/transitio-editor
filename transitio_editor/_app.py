@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 
 # shared with the catalogue's per-feed mode summary
 from transitio_editor._registry import base_route_type as _base_route_type
@@ -53,6 +54,16 @@ def _clean_id(value):
     return str(value).strip() if value is not None else ""
 
 
+def _has_geometry(value):
+    """Whether a row's geometry cell holds a real geometry.
+
+    A feed can carry a stop without coordinates or a shape with a single
+    point, which become missing geometries — read back from ``iterrows``
+    as ``None`` or as NaN, depending on the pandas/geopandas versions.
+    """
+    return hasattr(value, "__geo_interface__")
+
+
 def _merge_prefixes(names, feed_ids):
     """Id prefixes for a merge, derived from the feeds' display names.
 
@@ -71,6 +82,37 @@ def _merge_prefixes(names, feed_ids):
         used.add(candidate)
         prefixes.append(candidate)
     return prefixes
+
+
+def _json_safe_name(name):
+    """Whether a filesystem name survives JSON encoding.
+
+    POSIX names need not be UTF-8; such a name would fail the response
+    encoding and take the whole listing down with it.
+    """
+    try:
+        name.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+# Windows refuses these as file basenames, whatever the extension.
+_RESERVED_NAMES = frozenset(
+    ["CON", "PRN", "AUX", "NUL"]
+    + [f"COM{digit}" for digit in range(1, 10)]
+    + [f"LPT{digit}" for digit in range(1, 10)]
+)
+
+
+def _feed_filename(name):
+    """A safe ``.zip`` filename from a feed's display name."""
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-.")[:60]
+    if not stem:
+        stem = "merged"
+    elif stem.split(".")[0].upper() in _RESERVED_NAMES:
+        stem = f"feed-{stem}"
+    return f"{stem}.zip"
 
 
 def _editor_from_tables(tables):
@@ -125,7 +167,7 @@ def _network_features(frame):
     features = []
     for _, row in frame.iterrows():
         geometry = row[geometry_name]
-        if geometry is None:
+        if not _has_geometry(geometry):
             continue
         properties = {}
         for key, value in row.items():
@@ -261,6 +303,17 @@ def create_app(
             default_name(editor),
             source=os.fspath(source) if source else None,
         )
+
+    def _prepared_directory(value, what):
+        """Expand and create a caller-supplied output directory."""
+        if not isinstance(value, str) or not value.strip():
+            raise HTTPException(422, "'directory' must be a non-empty string")
+        try:
+            directory = Path(value).expanduser()
+            directory.mkdir(parents=True, exist_ok=True)
+        except (OSError, RuntimeError, ValueError, KeyError) as error:
+            raise HTTPException(422, f"cannot use {what}: {error}") from None
+        return directory
 
     def current_editor():
         entry = registry.current_entry()
@@ -408,7 +461,7 @@ def create_app(
             name_column = frame.geometry.name
             for _, row in frame.iterrows():
                 geometry = row.geometry
-                if geometry is None:
+                if not _has_geometry(geometry):
                     continue
                 properties = {
                     key: value for key, value in row.items() if key != name_column
@@ -434,7 +487,7 @@ def create_app(
                 continue
             route_types = _shape_route_types(entry.editor)
             for _, row in frame.iterrows():
-                if row.geometry is None:
+                if not _has_geometry(row.geometry):
                     continue
                 properties = {
                     "shape_id": row["shape_id"],
@@ -811,6 +864,9 @@ def create_app(
             raise HTTPException(422, "merging needs at least two feeds")
         if len(set(feed_ids)) != len(feed_ids):
             raise HTTPException(422, "a feed cannot be merged with itself")
+        directory = payload.get("directory")
+        if directory is not None:
+            directory = _prepared_directory(directory, "output directory")
         with lock:
             entries = []
             for feed_id in feed_ids:
@@ -835,9 +891,30 @@ def create_app(
             name = str(payload.get("name") or "").strip()
             if not name:
                 name = " + ".join(entry.name for entry in entries)[:60]
-            merged = registry.add(_editor_from_tables(tables), name)
+            editor = _editor_from_tables(tables)
+            # With an output folder the merged feed is written there and the
+            # entry keeps that path, so saving later goes back to the file.
+            saved = None
+            if directory is not None:
+                target = directory / _feed_filename(name)
+                # Never clobber a feed that is already there (nor follow a
+                # symlink planted at the target: transitio's save refuses).
+                if target.exists() or target.is_symlink():
+                    raise HTTPException(409, f"{target} already exists")
+                try:
+                    editor.save(target, check=False)
+                except (OSError, TypeError, ValueError) as error:
+                    raise HTTPException(
+                        422, f"cannot write merged feed: {error}"
+                    ) from None
+                saved = os.fspath(target)
+            merged = registry.add(editor, name, source=saved)
             registry.current = merged.feed_id
-            return {**entry_dict(merged, registry), "dropped_files": dropped}
+            return {
+                **entry_dict(merged, registry),
+                "dropped_files": dropped,
+                "saved": saved,
+            }
 
     @app.put("/api/catalogue/current")
     def catalogue_set_current(payload: dict = Body(...)):
@@ -906,15 +983,19 @@ def create_app(
 
     @app.get("/api/fs/dirs")
     def fs_dirs(path: str | None = None):
-        # Directory listing for the download-folder browser. Same local-file
-        # trust model as loading a feed from a path or saving to one: the
-        # loopback single user browses their own machine.
+        # Directory listing for the folder and feed browsers (feeds are the
+        # readable *.zip files, which is what a feed path can point at).
+        # Same local-file trust model as loading a feed from a path or
+        # saving to one: the loopback single user browses their own machine.
         try:
             base = Path(path).expanduser() if path else Path.home()
             base = base.resolve()
         except (OSError, RuntimeError, ValueError, KeyError) as error:
             # unknown ~user, symlink loops, NUL bytes: a clean 404, not a 500
             raise HTTPException(404, f"cannot resolve: {error}") from None
+        if base.is_file():
+            # pointed at a file (a typed feed path): browse its folder
+            base = base.parent
         if not base.is_dir():
             raise HTTPException(404, f"not a directory: {base}")
         subdirs = []
@@ -924,19 +1005,32 @@ def create_app(
             raise HTTPException(403, f"not readable: {base}") from None
         except OSError as error:  # e.g. the directory vanished meanwhile
             raise HTTPException(404, f"cannot list: {error}") from None
+        feeds = []
         for entry in entries:
             try:
-                if (
-                    entry.is_dir()
-                    and not entry.name.startswith(".")
+                if entry.name.startswith(".") or not _json_safe_name(entry.name):
+                    continue
+                if entry.is_dir():
                     # only offer directories the browser could descend into
-                    and os.access(entry, os.R_OK | os.X_OK)
+                    if os.access(entry, os.R_OK | os.X_OK):
+                        subdirs.append(entry.name)
+                elif (
+                    entry.suffix.lower() == ".zip"
+                    # regular files only: a FIFO named *.zip would hang the
+                    # load that follows picking it
+                    and entry.is_file()
+                    and os.access(entry, os.R_OK)
                 ):
-                    subdirs.append(entry.name)
+                    feeds.append(entry.name)
             except OSError:
                 continue  # unreadable entry: skip it
         parent = os.fspath(base.parent) if base.parent != base else None
-        return {"path": os.fspath(base), "parent": parent, "dirs": sorted(subdirs)}
+        return {
+            "path": os.fspath(base),
+            "parent": parent,
+            "dirs": sorted(subdirs),
+            "feeds": sorted(feeds),
+        }
 
     @app.get("/api/search")
     def search(
@@ -983,15 +1077,7 @@ def create_app(
             aoi = _acquire_bbox(aoi)  # validate before touching the network
         directory = payload.get("directory")
         if directory is not None:
-            if not isinstance(directory, str) or not directory.strip():
-                raise HTTPException(422, "'directory' must be a non-empty string")
-            try:
-                directory = Path(directory).expanduser()
-                directory.mkdir(parents=True, exist_ok=True)
-            except (OSError, RuntimeError, ValueError, KeyError) as error:
-                raise HTTPException(
-                    422, f"cannot use download directory: {error}"
-                ) from None
+            directory = _prepared_directory(directory, "download directory")
         feed = search_cache.get(feed_id)
         if feed is None:
             raise HTTPException(404, f"unknown feed {feed_id}; search for it first")

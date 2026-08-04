@@ -4,6 +4,7 @@ import {
   currentFeed,
   feedModes,
   feedTableSummary,
+  initialTab,
   mergeStatus,
 } from "../src/catalogue.js";
 
@@ -38,6 +39,14 @@ describe("currentFeed", () => {
   });
 });
 
+describe("initialTab", () => {
+  it("starts on the data when a feed was loaded, else on Search", () => {
+    expect(initialTab([{ feed_id: "feed-1" }])).toBe("view");
+    expect(initialTab([])).toBe("search");
+    expect(initialTab(undefined)).toBe("search");
+  });
+});
+
 describe("mergeStatus", () => {
   it("names the merged feed and any files the merge dropped", () => {
     expect(mergeStatus("HSL + Metro", [])).toBe('merged into "HSL + Metro"');
@@ -46,6 +55,15 @@ describe("mergeStatus", () => {
       mergeStatus("Combined", ["feed_info.txt", "translations.txt"]),
     ).toBe(
       'merged into "Combined" — feed_info.txt, translations.txt not carried over',
+    );
+  });
+
+  it("names the file it was saved to", () => {
+    expect(mergeStatus("Combined", [], "/data/Combined.zip")).toBe(
+      'merged into "Combined", saved to /data/Combined.zip',
+    );
+    expect(mergeStatus("Combined", ["feed_info.txt"], "/data/Combined.zip")).toBe(
+      'merged into "Combined", saved to /data/Combined.zip — feed_info.txt not carried over',
     );
   });
 });

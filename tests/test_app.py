@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 # Hard imports: the editor's CI always installs the full core and
@@ -707,6 +709,49 @@ def test_catalogue_merge_names_and_drops(editor, tmp_path):
     entry = client.get("/api/catalogue").json()["feeds"][-1]
     assert entry["name"] == "Combined" and entry["current"] is True
     assert "dropped_files" not in entry  # response-only, never persisted
+
+
+def test_catalogue_merge_into_chosen_folder(editor, tmp_path):
+    client = TestClient(create_app(editor))
+    other = _write_feed(tmp_path / "other.zip", "z9", 60.30, 25.10)
+    second = client.post("/api/catalogue", json={"path": str(other)}).json()
+    first_id = client.get("/api/catalogue").json()["feeds"][0]["feed_id"]
+    target = tmp_path / "out" / "nested"  # created on demand
+
+    merged = client.post(
+        "/api/catalogue/merge",
+        json={
+            "feed_ids": [first_id, second["feed_id"]],
+            "name": "Helsinki region",
+            "directory": str(target),
+        },
+    ).json()
+    written = target / "Helsinki-region.zip"  # name sanitised into a filename
+    assert merged["saved"] == str(written) and written.exists()
+    # the entry keeps the path, so a later save goes back to the same file
+    assert merged["source"] == str(written)
+    assert client.post("/api/save", json={}).status_code == 200
+    assert FeedEditor(written).tables["stops.txt"].shape[0] == 3
+    before = written.read_bytes()
+
+    assert (
+        client.post(
+            "/api/catalogue/merge",
+            json={"feed_ids": [first_id, second["feed_id"]], "directory": ""},
+        ).status_code
+        == 422
+    )
+    # merging again under the same name must not overwrite the first file
+    again = client.post(
+        "/api/catalogue/merge",
+        json={
+            "feed_ids": [first_id, second["feed_id"]],
+            "name": "Helsinki region",
+            "directory": str(target),
+        },
+    )
+    assert again.status_code == 409
+    assert written.read_bytes() == before
 
 
 def test_catalogue_merge_errors(editor, tmp_path):
@@ -2096,16 +2141,52 @@ def test_fs_dirs_lists_subdirectories(editor, tmp_path):
         client.get("/api/fs/dirs", params={"path": str(tmp_path / "nope")}).status_code
         == 404
     )
-    assert (
-        client.get(
-            "/api/fs/dirs", params={"path": str(tmp_path / "file.txt")}
-        ).status_code
-        == 404
-    )
+    # a path pointing at a file browses the folder that holds it
+    at_file = client.get("/api/fs/dirs", params={"path": str(tmp_path / "file.txt")})
+    assert at_file.status_code == 200 and at_file.json()["path"] == str(tmp_path)
     # no path: the browser starts at the home directory
     from pathlib import Path
 
     assert client.get("/api/fs/dirs").json()["path"] == str(Path.home())
+
+
+def test_fs_dirs_lists_feed_archives(editor, tmp_path):
+    client = TestClient(create_app(editor))
+    root = tmp_path / "browse"  # the fixture's own feed.zip lives in tmp_path
+    (root / "sub").mkdir(parents=True)
+    _write_feed(root / "b.zip", "z1", 60.1, 24.9)
+    _write_feed(root / "a.zip", "z2", 60.2, 24.8)
+    (root / "notes.txt").write_text("x")
+    (root / ".hidden.zip").write_bytes(b"x")
+    if hasattr(os, "mkfifo"):  # POSIX only
+        os.mkfifo(root / "pipe.zip")  # not a feed, and opening it would hang
+    body = client.get("/api/fs/dirs", params={"path": str(root)}).json()
+    # feeds are the pickable *.zip files; other files and dotfiles are not
+    assert body["feeds"] == ["a.zip", "b.zip"]
+    assert body["dirs"] == ["sub"]
+    # browsing to one of them lands in its folder, not a 404
+    assert client.get("/api/fs/dirs", params={"path": str(root / "a.zip")}).json()[
+        "path"
+    ] == str(root)
+
+
+def test_fs_dirs_skips_names_that_are_not_utf8(editor, tmp_path):
+    client = TestClient(create_app(editor))
+    root = tmp_path / "browse"
+    root.mkdir()
+    (root / "fine").mkdir()
+    # a name that decodes only through surrogateescape would break the JSON
+    # response; the listing skips it. Only filesystems that accept such a
+    # name (Linux, not macOS or Windows) can exercise this.
+    try:
+        # Windows decodes filesystem bytes strictly, so even naming the
+        # entry raises there; POSIX filesystems may still refuse it.
+        os.mkdir(os.path.join(root, os.fsdecode(b"bad\xff")))
+    except (OSError, ValueError):
+        pytest.skip("this platform has no non-UTF-8 filenames")
+    body = client.get("/api/fs/dirs", params={"path": str(root)})
+    assert body.status_code == 200
+    assert body.json()["dirs"] == ["fine"]
 
 
 def test_table_search_filters_rows(editor):
