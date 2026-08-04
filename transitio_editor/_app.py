@@ -1127,7 +1127,7 @@ def create_app(
                 json_module.dumps(view, allow_nan=False, ensure_ascii=False).encode(
                     "utf-8"
                 )
-            except (ValueError, UnicodeEncodeError):
+            except ValueError:  # UnicodeEncodeError is a ValueError
                 raise HTTPException(422, "'view' must be plain JSON") from None
         with lock:
             entries = registry.entries()
@@ -1196,7 +1196,7 @@ def create_app(
                 json_module.dumps(session, allow_nan=False, ensure_ascii=False).encode(
                     "utf-8"
                 )
-            except (ValueError, UnicodeEncodeError):
+            except ValueError:  # UnicodeEncodeError is a ValueError
                 # e.g. a lone surrogate from a non-UTF-8 filename: restore
                 # would refuse this file, so refuse to write it
                 raise HTTPException(
@@ -1307,7 +1307,7 @@ def create_app(
                 json_module.dumps(session, allow_nan=False, ensure_ascii=False).encode(
                     "utf-8"
                 )
-            except (ValueError, UnicodeEncodeError):
+            except ValueError:  # UnicodeEncodeError is a ValueError
                 raise HTTPException(422, "malformed session file") from None
 
             def _record_ok(record):
