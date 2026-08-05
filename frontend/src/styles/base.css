@@ -81,9 +81,9 @@ body {
   max-height: calc(100% - 60px);
 }
 .map-overlay.bottom-right {
-  /* above MapLibre's bottom-right zoom control */
-  bottom: 108px;
-  right: 10px;
+  /* beside MapLibre's bottom-right control column, never over it */
+  bottom: 22px;
+  right: 54px;
   align-items: flex-end;
 }
 

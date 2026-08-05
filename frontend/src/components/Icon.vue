@@ -29,6 +29,10 @@ defineProps({ name: { type: String, required: true } });
       <path d="m3 13 .9-3.2 6.8-6.8a1.55 1.55 0 0 1 2.3 2.3l-6.8 6.8L3 13Z" />
       <path d="m9.2 3.7 2.3 2.3" />
     </template>
+    <template v-else-if="name === 'map'">
+      <path d="M1.8 3.6 6 2.2l4 1.4 4.2-1.4v10.6L10 14.2l-4-1.4-4.2 1.4Z" />
+      <path d="M6 2.2v10.6M10 3.6v10.6" opacity="0.6" />
+    </template>
     <template v-else-if="name === 'trash'">
       <path d="M2.8 4.6h10.4" />
       <path d="M6.2 4.6V3.2h3.6v1.4" />

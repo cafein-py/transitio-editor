@@ -618,6 +618,9 @@
   font: 14px/1.4 var(--sans);
 }
 .basemap-control > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   background: rgba(255, 255, 255, 0.95);
   border: 1px solid #c9c5bb;
   border-radius: 6px;
@@ -625,6 +628,12 @@
   font-size: 12px;
   box-shadow: var(--shadow-overlay);
   cursor: pointer;
+}
+.basemap-control > button svg {
+  width: 13px;
+  height: 13px;
+  display: block;
+  color: var(--ink-3);
 }
 .basemap-control ul {
   list-style: none;
