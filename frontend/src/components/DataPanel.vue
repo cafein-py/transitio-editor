@@ -332,14 +332,17 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
       class="osm-row"
       :class="{ inactive: !store.network.visible }"
     >
-      <button
-        class="eye"
-        :class="{ off: !store.network.visible }"
-        :title="store.network.visible ? 'Hide from the map' : 'Show on the map'"
-        @click="toggleNetworkVisible"
-      >
-        <Icon :name="store.network.visible ? 'eye' : 'eye-off'" />
-      </button>
+      <div class="osm-left">
+        <button
+          class="eye"
+          :class="{ off: !store.network.visible }"
+          :title="store.network.visible ? 'Hide from the map' : 'Show on the map'"
+          @click="toggleNetworkVisible"
+        >
+          <Icon :name="store.network.visible ? 'eye' : 'eye-off'" />
+        </button>
+        <span class="osm-badge mono">OSM</span>
+      </div>
       <span class="osm-icon" :class="{ bad: store.network.error }">
         <svg viewBox="0 0 18 18" fill="none" stroke="currentColor">
           <path
@@ -368,7 +371,6 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
           >
             {{ osmName }}
           </span>
-          <span class="osm-badge mono">OSM</span>
         </div>
         <span v-if="osmMeta" class="mono osm-meta">{{ osmMeta }}</span>
       </div>
@@ -748,8 +750,16 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
   background: rgba(122, 79, 191, 0.055);
 }
 .osm-row.inactive .osm-main,
-.osm-row.inactive .osm-icon {
+.osm-row.inactive .osm-icon,
+.osm-row.inactive .osm-badge {
   opacity: 0.55;
+}
+.osm-left {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  flex: none;
 }
 .osm-icon {
   width: 20px;
