@@ -162,17 +162,6 @@ export const submitTrip = wrap(async () => {
   await mapBridge.refreshAll(false);
 });
 
-export const submitAgency = wrap(async () => {
-  await api("POST", "/api/agencies", { ...forms.agency });
-  logServerEdit("Agency added", forms.agency.agency_id);
-  await mapBridge.refreshAll(false);
-});
-
-export const submitService = wrap(async () => {
-  await api("POST", "/api/services", { ...forms.service });
-  logServerEdit("Service added", forms.service.service_id);
-  await mapBridge.refreshAll(false);
-});
 
 export async function onTimetableToggle(open) {
   if (!open) return;
@@ -270,6 +259,8 @@ export function resetFeedScopedState() {
   store.timetableRoute = "";
   store.routeTrips = [];
   store.routes = [];
+  store.services = [];
+  store.agencies = [];
   store.report = null;
   store.reportStale = false;
   store.saveResult = null;

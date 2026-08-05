@@ -198,15 +198,20 @@ export async function setCurrentFeed(feed) {
   }
 }
 
+// Make a feed the edit target: visible, current, editing on.
+export async function makeEditTarget(feed) {
+  if (!feed.active) await toggleFeedActive(feed);
+  if (!feed.current) await setCurrentFeed(feed);
+  if (!store.editMode) toggleEditMode();
+}
+
 // The row pencil: make the feed the edit target, or step editing off it.
 export async function toggleEditTarget(feed) {
   if (feed.current) {
     toggleEditMode();
     return;
   }
-  if (!feed.active) await toggleFeedActive(feed);
-  await setCurrentFeed(feed);
-  if (!store.editMode) toggleEditMode();
+  await makeEditTarget(feed);
 }
 
 export async function renameFeed(feed, rawName) {

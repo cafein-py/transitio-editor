@@ -10,7 +10,9 @@ import { loadCatalogue, setCurrentFeed } from "./actions/catalogue.js";
 import { checkNetworkAvailable } from "./actions/streets.js";
 import { configureSession, sessionRedo, sessionUndo } from "./session.js";
 import { undoShortcut } from "./undo.js";
+import AgenciesPanel from "./components/AgenciesPanel.vue";
 import AppHeader from "./components/AppHeader.vue";
+import CalPanel from "./components/CalPanel.vue";
 import DataPanel from "./components/DataPanel.vue";
 import MapDisplayBar from "./components/MapDisplayBar.vue";
 import NavRail from "./components/NavRail.vue";
@@ -25,7 +27,6 @@ import AttributeTable from "./components/AttributeTable.vue";
 import BasemapControl from "./components/BasemapControl.vue";
 import MapToolbar from "./components/MapToolbar.vue";
 /* Pre-redesign panels, hosted until each port step replaces them. */
-import AgencyServiceForm from "./components/AgencyServiceForm.vue";
 import CropPanel from "./components/CropPanel.vue";
 import CurrentFeedBar from "./components/CurrentFeedBar.vue";
 import SearchPanel from "./components/SearchPanel.vue";
@@ -114,7 +115,7 @@ onMounted(async () => {
       <!-- Ported panels render their own header. -->
       <div
         v-if="
-          !['data', 'stops', 'routes', 'streets', 'validate'].includes(
+          !['data', 'stops', 'routes', 'streets', 'validate', 'cal', 'agencies'].includes(
             store.activePanel,
           )
         "
@@ -134,11 +135,7 @@ onMounted(async () => {
 
       <RoutesPanel v-show="store.activePanel === 'routes'" />
 
-      <div v-show="store.activePanel === 'cal'" class="legacy">
-        <CurrentFeedBar />
-        <AgencyServiceForm v-if="store.editMode" />
-        <p v-else class="hint">Turn on editing to manage agencies and services.</p>
-      </div>
+      <CalPanel v-show="store.activePanel === 'cal'" />
 
       <div v-show="store.activePanel === 'trips'" class="legacy">
         <CurrentFeedBar />
@@ -149,13 +146,7 @@ onMounted(async () => {
         </p>
       </div>
 
-      <div v-show="store.activePanel === 'agencies'" class="legacy">
-        <CurrentFeedBar />
-        <p class="hint">
-          The agencies panel arrives in a later step — agencies are managed
-          under Services for now.
-        </p>
-      </div>
+      <AgenciesPanel v-show="store.activePanel === 'agencies'" />
 
       <StreetsPanel v-show="store.activePanel === 'streets'" />
 

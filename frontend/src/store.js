@@ -97,6 +97,8 @@ export const store = reactive({
   undoLabel: null, // what the next undo would revert (server-peeked)
   redoLabel: null,
   routes: [],
+  services: [], // current feed's calendar rows (Cal panel)
+  agencies: [], // current feed's agency rows (Agencies panel)
   timetableRoute: "",
   routeTrips: [],
   trip: null, // { trip_id, times: [...] }
@@ -170,18 +172,6 @@ const defaultForms = () => ({
     start: "06:00:00",
     end: "22:00:00",
     headway: 600,
-  },
-  agency: {
-    agency_id: "",
-    agency_name: "",
-    agency_url: "",
-    agency_timezone: "",
-  },
-  service: {
-    service_id: "",
-    days: "weekdays",
-    start_date: "20260101",
-    end_date: "20261231",
   },
 });
 
