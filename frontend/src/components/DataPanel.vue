@@ -80,6 +80,16 @@ async function commitRename(name) {
   await renameGroup(name, value);
 }
 
+// The dashed button creates the group right away under a placeholder
+// name and drops straight into renaming it.
+async function newGroup() {
+  const base = "New group";
+  let name = base;
+  for (let n = 2; store.groups.includes(name); n += 1) name = `${base} ${n}`;
+  await createGroup(name);
+  if (store.groups.includes(name)) startRename(name);
+}
+
 function onDrop(group) {
   dragOver.value = null;
   dropFeedInGroup(group);
@@ -276,20 +286,7 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
       </span>
     </div>
 
-    <div class="new-group">
-      <input
-        v-model="store.newGroupName"
-        placeholder="New group…"
-        @keyup.enter="createGroup"
-      />
-      <button
-        class="btn small"
-        :disabled="!store.newGroupName.trim()"
-        @click="createGroup"
-      >
-        Add group
-      </button>
-    </div>
+    <button class="new-group" @click="newGroup">+ New group</button>
 
     <!-- Merge, session and load-by-path keep their pre-redesign forms
          until their own port steps. -->
@@ -666,15 +663,16 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
   color: var(--ink-6);
 }
 .new-group {
-  display: flex;
-  gap: 6px;
+  border: 1px dashed var(--border-4);
+  background: transparent;
+  border-radius: 9px;
+  padding: 7px;
+  font: 11.5px var(--sans);
+  color: var(--ink-5);
+  cursor: pointer;
 }
-.new-group input {
-  flex: 1;
-  font: 12px var(--sans);
-  border: 1px solid var(--border-3);
-  border-radius: var(--r-input);
-  padding: 5px 10px;
-  background: var(--surface);
+.new-group:hover {
+  border-color: var(--accent-border);
+  color: var(--accent);
 }
 </style>

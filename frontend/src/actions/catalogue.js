@@ -38,12 +38,11 @@ const groupsPath = (name) =>
 // Every group mutation re-reads the catalogue rather than assigning the
 // response directly: loadCatalogue is the one guarded writer, so an
 // older in-flight listing cannot paint over the change.
-export async function createGroup() {
-  const name = store.newGroupName.trim();
+export async function createGroup(rawName) {
+  const name = (rawName || "").trim();
   if (!name) return;
   try {
     await api("POST", "/api/catalogue/groups", { name });
-    store.newGroupName = "";
     store.status = "";
     logRequestEdit(
       "Group added",
