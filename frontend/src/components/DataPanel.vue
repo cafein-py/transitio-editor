@@ -22,6 +22,7 @@ import {
 } from "../actions.js";
 import { toggleNetworkVisible } from "../actions/streets.js";
 import { groupedCatalogue } from "../catalogue.js";
+import { bboxLabel } from "../streets.js";
 import { store } from "../store.js";
 import FeedCard from "./FeedCard.vue";
 import FileBrowser from "./FileBrowser.vue";
@@ -96,8 +97,22 @@ function onDrop(group) {
 }
 
 const osmName = computed(() => {
+  if (store.network.displayName) return store.network.displayName;
   const source = store.network.source;
   return source ? source.split("/").pop() : "OSM network";
+});
+
+const osmMeta = computed(() => {
+  const parts = [];
+  if (store.network.loaded) {
+    parts.push(
+      `${store.network.wayCount.toLocaleString()} ways`,
+      `${store.network.nodeCount.toLocaleString()} nodes`,
+    );
+  }
+  const label = bboxLabel(store.network.bbox);
+  if (label) parts.push(label);
+  return parts.join(" · ");
 });
 
 const canMerge = computed(() => store.merge.selected.length >= 2);
@@ -282,14 +297,14 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
         :class="{ bad: store.network.error }"
         :title="store.network.error || null"
       ></span>
-      <span class="mono osm-name" :title="store.network.source">
-        {{ osmName }}
-      </span>
-      <span v-if="store.network.loaded" class="mono osm-meta">
-        {{ store.network.wayCount }} ways
-      </span>
+      <div class="osm-main">
+        <span class="osm-name" :title="store.network.source">
+          {{ osmName }}
+        </span>
+        <span v-if="osmMeta" class="mono osm-meta">{{ osmMeta }}</span>
+      </div>
       <button
-        v-else-if="store.network.error"
+        v-if="!store.network.loaded && store.network.error"
         class="btn small"
         title="The network did not load — details on the Streets panel"
         @click="store.activePanel = 'streets'"
@@ -665,17 +680,27 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
 .osm-dot.bad {
   background: var(--error);
 }
-.osm-name {
+.osm-main {
   flex: 1;
   min-width: 0;
-  font-size: 10.5px;
+}
+.osm-name {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 550;
+  line-height: 1.25;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .osm-meta {
+  display: block;
   font-size: 10px;
   color: var(--ink-6);
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .new-group {
   border: 1px dashed var(--border-4);

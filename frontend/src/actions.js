@@ -415,6 +415,8 @@ export async function loadSession(flags = {}) {
       editing: false,
       vertexEdit: false,
       savePath: "",
+      displayName: null,
+      bbox: null,
       nodeCount: 0,
       wayCount: 0,
       error: "",

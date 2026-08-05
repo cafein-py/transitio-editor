@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  bboxLabel,
   classCounts,
   classFilter,
   classOfHighway,
   DEFAULT_HIDDEN_CLASSES,
+  extractDisplay,
   HIGHWAY_CLASSES,
   lineLengthKm,
   wayClass,
@@ -44,6 +46,37 @@ describe("class detection", () => {
 describe("service and footway start hidden", () => {
   it("matches the design default", () => {
     expect(DEFAULT_HIDDEN_CLASSES.sort()).toEqual(["footway", "service"]);
+  });
+});
+
+describe("extractDisplay", () => {
+  it("prettifies region file names", () => {
+    expect(extractDisplay("/cache/new-york-latest.osm.pbf")).toEqual({
+      name: "New York",
+      bbox: null,
+    });
+    expect(extractDisplay("finland.osm.pbf").name).toBe("Finland");
+  });
+
+  it("parses map-view crop names into a bbox", () => {
+    const parsed = extractDisplay(
+      "/cache/bbox_-74.00303_40.72966_-73.93_40.8.osm.pbf",
+    );
+    expect(parsed.name).toBeNull();
+    expect(parsed.bbox).toEqual([-74.00303, 40.72966, -73.93, 40.8]);
+  });
+
+  it("handles nothing loaded", () => {
+    expect(extractDisplay(null)).toEqual({ name: null, bbox: null });
+  });
+});
+
+describe("bboxLabel", () => {
+  it("rounds to a compact chip label", () => {
+    expect(bboxLabel([-74.00303, 40.72966, -73.93, 40.8])).toBe(
+      "-74.003, 40.730 → -73.930, 40.800",
+    );
+    expect(bboxLabel(null)).toBeNull();
   });
 });
 

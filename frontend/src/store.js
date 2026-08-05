@@ -116,6 +116,8 @@ export const store = reactive({
   network: {
     available: false, // an OSM extract is loaded (--osm-pbf or acquired)
     source: null, // path of the current OSM extract, for the catalogue row
+    displayName: null, // readable area name (resolver name or file stem)
+    bbox: null, // the crop area of a map-view extract, shown as metadata
     loaded: false, // node/way GeoJSON fetched into the map
     loading: false,
     visible: true, // layer visibility toggle

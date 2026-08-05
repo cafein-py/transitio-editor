@@ -17,12 +17,11 @@ import { waysData } from "../entities.js";
 import * as mapBridge from "../map.js";
 import { selectWay } from "../map/streets.js";
 import {
+  bboxLabel,
   classCounts,
-  HIGHWAY_CLASSES,
   highwayClass,
   lineLengthKm,
   wayClass,
-  wayHighway,
 } from "../streets.js";
 import { store } from "../store.js";
 import { useEntityList } from "../composables/useEntityList.js";
@@ -38,8 +37,16 @@ watch(
 );
 
 const extractName = computed(() => {
+  if (store.network.displayName) return store.network.displayName;
   const source = store.network.source;
   return source ? source.split("/").pop() : "no extract loaded";
+});
+
+const extractTitle = computed(() => {
+  const parts = [store.network.source];
+  const label = bboxLabel(store.network.bbox);
+  if (label) parts.push(`bbox ${label}`);
+  return parts.filter(Boolean).join("\n");
 });
 
 // Way rows from the raw network data; class and length are cached on the
@@ -141,7 +148,7 @@ const acquireOpen = ref(false);
         class="dot"
         :class="{ off: !store.network.available, bad: store.network.error }"
       ></span>
-      <span class="mono extract-name" :title="store.network.source">
+      <span class="mono extract-name" :title="extractTitle">
         {{ extractName }}
       </span>
       <button class="btn small" @click="acquireOpen = !acquireOpen">Swap</button>

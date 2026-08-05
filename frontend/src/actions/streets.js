@@ -6,6 +6,7 @@ import * as mapBridge from "../map.js";
 import { applyHiddenClasses, selectWay, setStreetsVisible } from "../map/streets.js";
 import { NETWORK_FEED, logPlain, logRequestEdit } from "../session.js";
 import { store } from "../store.js";
+import { extractDisplay } from "../streets.js";
 import { pushToast } from "../toasts.js";
 
 // A slow pre-restore availability check must not overwrite the state a
@@ -21,6 +22,15 @@ export async function checkNetworkAvailable() {
     store.network.source = body.source || null;
     if (!store.network.savePath && store.network.source) {
       store.network.savePath = store.network.source;
+    }
+    // Identity from the file name when nothing better is known (a fresh
+    // start; an acquire in this session sets the resolver's area name).
+    // A bbox-crop file keeps no area name — label it for what it is.
+    if (!store.network.displayName) {
+      const parsed = extractDisplay(store.network.source);
+      store.network.displayName =
+        parsed.name || (parsed.bbox ? "Map view extract" : null);
+      store.network.bbox = parsed.bbox;
     }
     // Both domains are visible by default: load the network eagerly so it
     // shows alongside the feed from the start, not only on panel open.
@@ -252,6 +262,10 @@ export async function acquireOsm(discardEdits = false) {
   net.available = true;
   net.loaded = false;
   net.savePath = net.source || "";
+  // The resolver's readable area name (e.g. "new-york"), not the crop
+  // file's bbox_… name; the crop bbox becomes row metadata.
+  net.displayName = extractDisplay(`${resolved.name}.osm.pbf`).name;
+  net.bbox = resolved.bbox || null;
   selectWay(null);
   net.error = "";
   try {

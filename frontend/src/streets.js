@@ -67,6 +67,41 @@ export function wayClass(properties) {
   return value ? classOfHighway(value) : "service";
 }
 
+// Display identity of an extract from its file path: a readable name for
+// region files ("new-york-latest.osm.pbf" → "New York") and the parsed
+// bounding box for map-view crops ("bbox_-74.0_40.7_-73.9_40.8.osm.pbf").
+export function extractDisplay(source) {
+  if (!source) return { name: null, bbox: null };
+  let base = String(source).split(/[\\/]/).pop();
+  for (const suffix of ["-latest.osm.pbf", ".osm.pbf", ".pbf"]) {
+    if (base.endsWith(suffix)) {
+      base = base.slice(0, -suffix.length);
+      break;
+    }
+  }
+  const bboxMatch = base.match(
+    /^bbox_(-?[\d.]+)_(-?[\d.]+)_(-?[\d.]+)_(-?[\d.]+)$/,
+  );
+  if (bboxMatch) {
+    const bbox = bboxMatch.slice(1, 5).map(Number);
+    return bbox.every(Number.isFinite)
+      ? { name: null, bbox }
+      : { name: null, bbox: null };
+  }
+  const name = base
+    .replace(/[-_]+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+  return { name: name || null, bbox: null };
+}
+
+// "-74.003, 40.730 → -73.930, 40.800" for a bbox chip.
+export function bboxLabel(bbox) {
+  if (!bbox || bbox.length !== 4) return null;
+  const f = (value) => Number(value).toFixed(3);
+  return `${f(bbox[0])}, ${f(bbox[1])} → ${f(bbox[2])}, ${f(bbox[3])}`;
+}
+
 // Great-circle length of a [lon, lat] LineString, in kilometres.
 export function lineLengthKm(coordinates) {
   const R = 6371;
