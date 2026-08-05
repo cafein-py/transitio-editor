@@ -7,14 +7,14 @@ import { createMap } from "./map.js";
 import { editTarget } from "./network.js";
 import {
   checkNetworkAvailable,
-  loadCatalogue,
   refreshAfterHistory,
-  setCurrentFeed,
   toggleEditMode,
 } from "./actions.js";
+import { loadCatalogue, setCurrentFeed } from "./actions/catalogue.js";
 import { configureSession, sessionRedo, sessionUndo } from "./session.js";
 import { undoShortcut } from "./undo.js";
 import AppHeader from "./components/AppHeader.vue";
+import DataPanel from "./components/DataPanel.vue";
 import NavRail from "./components/NavRail.vue";
 import SessionDrawer from "./components/SessionDrawer.vue";
 import Toasts from "./components/Toasts.vue";
@@ -23,10 +23,8 @@ import BasemapControl from "./components/BasemapControl.vue";
 import MapToolbar from "./components/MapToolbar.vue";
 /* Pre-redesign panels, hosted until each port step replaces them. */
 import AgencyServiceForm from "./components/AgencyServiceForm.vue";
-import CataloguePanel from "./components/CataloguePanel.vue";
 import CropPanel from "./components/CropPanel.vue";
 import CurrentFeedBar from "./components/CurrentFeedBar.vue";
-import FeedSummary from "./components/FeedSummary.vue";
 import NetworkPanel from "./components/NetworkPanel.vue";
 import RouteForm from "./components/RouteForm.vue";
 import RouteLegend from "./components/RouteLegend.vue";
@@ -111,36 +109,39 @@ onMounted(async () => {
   <div class="shell-body">
     <NavRail />
     <aside
-      class="shell-aside legacy"
+      class="shell-aside"
       :class="{ narrow: store.layout === 'inspector' }"
     >
-      <div class="panel-title">{{ PANEL_TITLES[store.activePanel] }}</div>
-
-      <div v-show="store.activePanel === 'data'">
-        <CataloguePanel />
-        <RouteLegend />
-        <CropPanel />
-        <FeedSummary />
+      <div v-if="store.activePanel !== 'data'" class="panel-title">
+        {{ PANEL_TITLES[store.activePanel] }}
       </div>
 
-      <div v-show="store.activePanel === 'stops'">
+      <div v-show="store.activePanel === 'data'">
+        <DataPanel />
+        <div class="legacy">
+          <RouteLegend />
+          <CropPanel />
+        </div>
+      </div>
+
+      <div v-show="store.activePanel === 'stops'" class="legacy">
         <CurrentFeedBar />
         <p class="hint">Select a stop on the map to inspect it.</p>
       </div>
 
-      <div v-show="store.activePanel === 'routes'">
+      <div v-show="store.activePanel === 'routes'" class="legacy">
         <CurrentFeedBar />
         <RouteForm v-if="store.editMode" />
         <p v-else class="hint">Turn on editing to add routes.</p>
       </div>
 
-      <div v-show="store.activePanel === 'cal'">
+      <div v-show="store.activePanel === 'cal'" class="legacy">
         <CurrentFeedBar />
         <AgencyServiceForm v-if="store.editMode" />
         <p v-else class="hint">Turn on editing to manage agencies and services.</p>
       </div>
 
-      <div v-show="store.activePanel === 'trips'">
+      <div v-show="store.activePanel === 'trips'" class="legacy">
         <CurrentFeedBar />
         <TripForm v-if="store.editMode" />
         <TimetablePanel v-if="store.editMode" />
@@ -149,7 +150,7 @@ onMounted(async () => {
         </p>
       </div>
 
-      <div v-show="store.activePanel === 'agencies'">
+      <div v-show="store.activePanel === 'agencies'" class="legacy">
         <CurrentFeedBar />
         <p class="hint">
           The agencies panel arrives in a later step — agencies are managed
@@ -157,17 +158,23 @@ onMounted(async () => {
         </p>
       </div>
 
-      <NetworkPanel v-show="store.activePanel === 'streets'" />
+      <div v-show="store.activePanel === 'streets'" class="legacy">
+        <NetworkPanel />
+      </div>
 
-      <div v-show="store.activePanel === 'validate'">
+      <div v-show="store.activePanel === 'validate'" class="legacy">
         <CurrentFeedBar />
         <ValidationReport />
       </div>
 
-      <SearchPanel v-show="store.activePanel === 'search'" />
+      <div v-show="store.activePanel === 'search'" class="legacy">
+        <SearchPanel />
+      </div>
 
-      <StopInspector v-if="feedPanel && store.activePanel !== 'search'" />
-      <div v-if="store.status" id="status">{{ store.status }}</div>
+      <div class="legacy">
+        <StopInspector v-if="feedPanel && store.activePanel !== 'search'" />
+        <div v-if="store.status" id="status">{{ store.status }}</div>
+      </div>
     </aside>
 
     <div class="shell-main">

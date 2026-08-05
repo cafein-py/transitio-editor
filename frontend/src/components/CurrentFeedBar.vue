@@ -2,7 +2,7 @@
 import { computed } from "vue";
 
 import { store } from "../store.js";
-import { setCurrentFeed } from "../actions.js";
+import { setCurrentFeed } from "../actions/catalogue.js";
 
 const current = computed(
   () => store.catalogue.find((feed) => feed.current) || null,

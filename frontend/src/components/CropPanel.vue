@@ -2,7 +2,7 @@
 import { computed } from "vue";
 
 import { store } from "../store.js";
-import { cropToShape } from "../actions.js";
+import { cropToShape } from "../actions/catalogue.js";
 import { cancelCropDraw } from "../map.js";
 
 const activeFeeds = computed(() =>

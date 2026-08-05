@@ -2,12 +2,7 @@
 // and/or calls the API, then refreshes the map. `wrap` funnels errors to
 // the status line and marks the validation report stale.
 import { api } from "./api.js";
-import {
-  cropRequestBody,
-  cropStatus,
-  mergeStatus,
-  moveFeedToGroup,
-} from "./catalogue.js";
+import { loadCatalogue } from "./actions/catalogue.js";
 import {
   restoreSessionStatus,
   saveSessionStatus,
@@ -642,127 +637,10 @@ export const shiftTrip = wrap(async () => {
   await mapBridge.refreshSummary(); // the undo label just changed
 });
 
-// Overlapping reloads (a drop while another mutation settles) must not
-// let an older listing paint over a newer one.
-let catalogueSeq = 0;
-
-export async function loadCatalogue() {
-  const seq = ++catalogueSeq;
-  try {
-    const body = await api("GET", "/api/catalogue");
-    if (seq !== catalogueSeq) return;
-    store.catalogue = body.feeds;
-    store.groups = body.groups || [];
-    store.currentFeedId = body.current;
-  } catch (error) {
-    if (seq !== catalogueSeq) return;
-    store.status = error.message;
-  }
-}
-
-// Every group mutation re-reads the catalogue rather than assigning the
-// response directly: loadCatalogue is the one guarded writer, so an
-// older in-flight listing cannot paint over the change.
-export async function createGroup() {
-  const name = store.newGroupName.trim();
-  if (!name) return;
-  try {
-    await api("POST", "/api/catalogue/groups", { name });
-    store.newGroupName = "";
-    store.status = "";
-    await loadCatalogue();
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-export async function renameGroup(name, newName) {
-  const target = (newName || "").trim();
-  if (!target || target === name) return;
-  try {
-    await api("PATCH", "/api/catalogue/groups", { name, new_name: target });
-    await loadCatalogue();
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-export async function deleteGroup(name) {
-  try {
-    await api(
-      "DELETE",
-      `/api/catalogue/groups?name=${encodeURIComponent(name)}`,
-    );
-    await loadCatalogue();
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-// Drag and drop between group sections; the pure part is moveFeedToGroup.
-export function startFeedDrag(feed) {
-  store.draggingFeedId = feed.feed_id;
-}
-
-export function endFeedDrag() {
-  store.draggingFeedId = null;
-}
-
-// Drops are applied one at a time, in the order they happened: parallel
-// PATCHes could otherwise land out of order and file a feed in the group
-// it was dragged out of. `requested` holds each feed's latest requested
-// group so a quick drag-back is not read as a no-op against the
-// not-yet-reloaded catalogue.
-let dropQueue = Promise.resolve();
-const requested = new Map();
-
-export async function dropFeedInGroup(group) {
-  const feed = store.catalogue.find(
-    (entry) => entry.feed_id === store.draggingFeedId,
-  );
-  store.draggingFeedId = null;
-  if (!feed) return;
-  const pending = requested.has(feed.feed_id)
-    ? { ...feed, group: requested.get(feed.feed_id) }
-    : feed;
-  const move = moveFeedToGroup(pending, group);
-  if (!move) return;
-  requested.set(move.feed_id, move.group);
-  dropQueue = dropQueue.then(async () => {
-    try {
-      await api("PATCH", `/api/catalogue/${encodeURIComponent(move.feed_id)}`, {
-        group: move.group,
-      });
-      await loadCatalogue();
-    } catch (error) {
-      store.status = error.message;
-    } finally {
-      if (requested.get(move.feed_id) === move.group) {
-        requested.delete(move.feed_id);
-      }
-    }
-  });
-  await dropQueue;
-}
-
-export async function addFeed() {
-  const path = store.newFeedPath.trim();
-  if (!path) return;
-  try {
-    await api("POST", "/api/catalogue", { path });
-    store.newFeedPath = "";
-    await loadCatalogue();
-    await mapBridge.refreshAll(true);
-    store.status = "";
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
 // Interaction state (selection, drafts, timetable, report) is scoped to
 // the current feed; wipe it when the edit target changes so later actions
 // can't target entities from the previous feed.
-function resetFeedScopedState() {
+export function resetFeedScopedState() {
   setMode("select"); // also clears movingStop and the draw preview
   store.inspector = null;
   mapBridge.clearFeedSelection();
@@ -780,73 +658,6 @@ function resetFeedScopedState() {
   store.redoLabel = null;
   resetForms();
   mapBridge.clearHighlight();
-}
-
-export async function setCurrentFeed(feed) {
-  try {
-    const body = await api("PUT", "/api/catalogue/current", {
-      feed_id: feed.feed_id,
-    });
-    resetFeedScopedState();
-    // Reflect the committed switch locally so the UI stays consistent even
-    // if the follow-up reload fails; loadCatalogue then refreshes the rest.
-    store.currentFeedId = body.current;
-    for (const entry of store.catalogue) {
-      entry.current = entry.feed_id === body.current;
-    }
-    await loadCatalogue();
-    await mapBridge.refreshSummary();
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-export async function toggleFeedActive(feed) {
-  try {
-    await api("PATCH", `/api/catalogue/${encodeURIComponent(feed.feed_id)}`, {
-      active: !feed.active,
-    });
-    await loadCatalogue();
-    await mapBridge.refreshAll(false);
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-export async function removeFeed(feed) {
-  try {
-    await api("DELETE", `/api/catalogue/${encodeURIComponent(feed.feed_id)}`);
-    // Removing the current feed reassigns current, so drop its state too.
-    if (feed.current) resetFeedScopedState();
-    store.merge.selected = store.merge.selected.filter(
-      (id) => id !== feed.feed_id,
-    );
-    await loadCatalogue();
-    await mapBridge.refreshAll(false);
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-// Cropping the feeds on the map to the drawn area. The shape is drawn
-// first and confirmed here, so an accidental double-click cannot start a
-// long operation and the options can be set before it runs.
-export async function cropToShape() {
-  const body = cropRequestBody(store.cropShape, store.crop);
-  if (!body || store.crop.running) return;
-  store.crop.running = true;
-  try {
-    const result = await api("POST", "/api/catalogue/crop", body);
-    mapBridge.cancelCropDraw(); // clears the shape and the drawing state
-    await loadCatalogue();
-    await mapBridge.refreshAll(false);
-    await mapBridge.refreshSummary();
-    store.status = cropStatus(result);
-  } catch (error) {
-    store.status = error.message;
-  } finally {
-    store.crop.running = false;
-  }
 }
 
 // Saving and restoring sessions. The view snapshot and the restore
@@ -1005,39 +816,6 @@ export async function refreshAfterHistory() {
     }
   }
   closeInspector(); // its stop may no longer exist or match
-}
-
-export function toggleMergeSelected(feed) {
-  const selected = store.merge.selected;
-  store.merge.selected = selected.includes(feed.feed_id)
-    ? selected.filter((id) => id !== feed.feed_id)
-    : [...selected, feed.feed_id];
-}
-
-export async function mergeSelected() {
-  const merge = store.merge;
-  if (merge.selected.length < 2 || merge.merging) return;
-  merge.merging = true;
-  try {
-    const directory = merge.directory.trim();
-    const body = await api("POST", "/api/catalogue/merge", {
-      feed_ids: [...merge.selected],
-      name: merge.name.trim(),
-      ...(directory ? { directory } : {}),
-    });
-    // The merge makes the new feed current, so old feed-scoped state goes.
-    resetFeedScopedState();
-    merge.selected = [];
-    merge.name = "";
-    await loadCatalogue();
-    await mapBridge.refreshAll(false);
-    await mapBridge.refreshSummary();
-    store.status = mergeStatus(body.name, body.dropped_files, body.saved);
-  } catch (error) {
-    store.status = error.message;
-  } finally {
-    merge.merging = false;
-  }
 }
 
 export async function runSearch() {

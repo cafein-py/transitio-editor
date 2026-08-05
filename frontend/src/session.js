@@ -52,15 +52,15 @@ export function logServerEdit(title, detail) {
   logAction({ kind: "server", feedId: store.currentFeedId, title, detail });
 }
 
-export function logRequestEdit(title, detail, undoReq, redoReq) {
+export function logRequestEdit(title, detail, undoReq, redoReq, feedId = NETWORK_FEED) {
   if (!undoReq) {
     // no way back known: keep the record, refuse the undo
-    logAction({ kind: "none", feedId: NETWORK_FEED, title, detail });
+    logAction({ kind: "none", feedId, title, detail });
     return;
   }
   logAction({
     kind: "request",
-    feedId: NETWORK_FEED,
+    feedId,
     title,
     detail,
     undoReq,
