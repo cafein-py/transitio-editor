@@ -733,12 +733,20 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
 }
 .osm-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
-  border: 1px solid rgba(122, 79, 191, 0.28);
+  border: 1px solid rgba(122, 79, 191, 0.32);
   border-radius: var(--r-card);
-  padding: 7px 9px;
-  background: var(--surface);
+  padding: 8px 9px;
+  /* faint diagonal weave over a purple tint: reads as "not a feed" at a
+     glance, even before the icon and badge */
+  background:
+    repeating-linear-gradient(
+      45deg,
+      rgba(122, 79, 191, 0.045) 0 5px,
+      transparent 5px 11px
+    ),
+    rgba(122, 79, 191, 0.05);
 }
 .osm-icon {
   width: 20px;
@@ -764,7 +772,7 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
 }
 .osm-name-row {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 6px;
   min-width: 0;
 }
@@ -772,9 +780,7 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
   font-size: 12.5px;
   font-weight: 550;
   line-height: 1.25;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
   cursor: text;
 }
 .osm-badge {
@@ -791,9 +797,7 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
   font-size: 10px;
   color: var(--ink-6);
   margin-top: 3px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.4;
 }
 .new-group {
   border: 1px dashed var(--border-4);
