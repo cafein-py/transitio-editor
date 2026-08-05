@@ -81,6 +81,11 @@ function selectRow(stop) {
   mapBridge.setSelectedStop({ stop_id: stop.stopId, feed_id: stop.feedId });
 }
 
+function zoomToRow(stop) {
+  selectRow(stop);
+  mapBridge.flyToPoint([stop.lon, stop.lat]);
+}
+
 // Map selection → the row: jump to its page and scroll it into view
 // (only while this panel is the one in use).
 watch(
@@ -138,7 +143,9 @@ watch(
         class="row"
         :class="{ selected: isSelected(stop) }"
         :data-selected="isSelected(stop) || null"
+        title="Double-click to zoom to the stop"
         @click="selectRow(stop)"
+        @dblclick="zoomToRow(stop)"
       >
         <span class="pin" :style="{ background: stop.color }"></span>
         <span class="row-main">

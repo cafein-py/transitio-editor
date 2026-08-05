@@ -117,6 +117,12 @@ export function jumpTo(center, zoom) {
   if (map) map.jumpTo({ center, zoom });
 }
 
+// Fly close to a point (a double-clicked list row); never zooms OUT past
+// a view the user already narrowed further.
+export function flyToPoint(center, zoom = 16) {
+  if (map) map.flyTo({ center, zoom: Math.max(map.getZoom(), zoom) });
+}
+
 export function fitToStops() {
   if (!map || !lastStops || !lastStops.features.length) return;
   const bounds = new maplibregl.LngLatBounds();
