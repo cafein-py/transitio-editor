@@ -695,17 +695,23 @@ export function createMap() {
     });
     // Stop size follows the zoom, so a whole-region feed reads as dots
     // instead of covering the map; street zooms keep the clickable size.
+    // The low end stays tiny: a dense city feed at city scale must not
+    // blanket the basemap.
     const stopRadius = (scale) => [
       "interpolate",
       ["linear"],
       ["zoom"],
       7,
-      1.5 * scale,
+      0.8 * scale,
       10,
-      3 * scale,
-      13,
-      6 * scale,
+      1.6 * scale,
+      12,
+      2.4 * scale,
+      14,
+      4.5 * scale,
       16,
+      7 * scale,
+      18,
       9 * scale,
     ];
     map.addLayer({
@@ -721,9 +727,13 @@ export function createMap() {
           ["linear"],
           ["zoom"],
           7,
-          0.5,
-          13,
-          1.5,
+          0.3,
+          12,
+          0.7,
+          14,
+          1.2,
+          16,
+          1.8,
         ],
       },
     });
