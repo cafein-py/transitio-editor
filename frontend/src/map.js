@@ -1031,10 +1031,19 @@ export function createMap() {
       if (event.defaultPrevented || store.aoiDrawing || croppingClick()) return;
       if (editTarget(store.activePanel) === "network") {
         handleNetworkClick(event);
-      } else if (store.editMode) {
+        return;
+      }
+      if (store.editMode) {
         // Feed mutations only with the editing switch on: an armed mode
         // (add stop, draw) must not fire while just viewing.
         handleMapClick(event);
+      }
+      // A click on empty map in select mode deselects the stop (feature
+      // clicks never reach here — their handlers preventDefault above).
+      if (store.mode === "select" && !store.movingStop && !store.tripPicking) {
+        store.inspector = null;
+        store.selectedStopId = null;
+        setSelectedStop(null);
       }
     });
 
