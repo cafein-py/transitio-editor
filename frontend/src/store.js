@@ -101,7 +101,9 @@ export const store = reactive({
   routeTrips: [],
   trip: null, // { trip_id, times: [...] }
   shiftSeconds: 600,
-  report: null, // last validation report
+  report: null, // last validation report of the current feed
+  reports: {}, // feed_id → report, the workspace-wide roll-up
+  validating: false, // a workspace validation sweep is running
   reportStale: false, // edits happened after the last validation
   highlightActive: false,
   feedVisible: true, // GTFS layer group visibility toggle

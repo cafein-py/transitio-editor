@@ -174,17 +174,6 @@ export const submitService = wrap(async () => {
   await mapBridge.refreshAll(false);
 });
 
-export async function validateFeed() {
-  try {
-    const body = await api("POST", "/api/validate", {});
-    store.report = body.report;
-    store.reportStale = false;
-    store.status = "";
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
 export async function onTimetableToggle(open) {
   if (!open) return;
   try {
@@ -680,6 +669,9 @@ export async function saveFeed() {
       return acc;
     }, {});
     store.report = saved.report;
+    if (store.currentFeedId) {
+      store.reports = { ...store.reports, [store.currentFeedId]: saved.report };
+    }
     store.reportStale = false;
     store.saveResult = {
       clean: saved.clean,

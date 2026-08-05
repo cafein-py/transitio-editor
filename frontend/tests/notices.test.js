@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  codeHint,
   describeContext,
   groupNotices,
   severityCounts,
@@ -86,5 +87,15 @@ describe("describeContext", () => {
   });
   it("handles empty context", () => {
     expect(describeContext({})).toBe("(no context)");
+  });
+});
+
+describe("codeHint", () => {
+  it("reads a notice code as plain language", () => {
+    expect(codeHint("fast_travel_between_stops")).toBe(
+      "Fast travel between stops",
+    );
+    expect(codeHint("")).toBe("");
+    expect(codeHint(null)).toBe("");
   });
 });

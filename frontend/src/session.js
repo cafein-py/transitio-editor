@@ -42,9 +42,11 @@ export function logAction(entry) {
     ...entry,
   });
   if (log.length > LOG_LIMIT) log.splice(0, log.length - LOG_LIMIT);
-  // A new action invalidates what was undone before it.
+  // A new action invalidates what was undone before it, and any
+  // validation report no longer reflects the data.
   store.session.redoStack.length = 0;
   store.dirty = true;
+  store.reportStale = true;
 }
 
 // The common cases, so call sites stay one line.

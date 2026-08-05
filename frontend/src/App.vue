@@ -18,6 +18,7 @@ import RoutesPanel from "./components/RoutesPanel.vue";
 import SessionDrawer from "./components/SessionDrawer.vue";
 import StopsPanel from "./components/StopsPanel.vue";
 import StreetsPanel from "./components/StreetsPanel.vue";
+import ValidatePanel from "./components/ValidatePanel.vue";
 import WayCard from "./components/WayCard.vue";
 import Toasts from "./components/Toasts.vue";
 import AttributeTable from "./components/AttributeTable.vue";
@@ -31,7 +32,6 @@ import SearchPanel from "./components/SearchPanel.vue";
 import StopInspector from "./components/StopInspector.vue";
 import TimetablePanel from "./components/TimetablePanel.vue";
 import TripForm from "./components/TripForm.vue";
-import ValidationReport from "./components/ValidationReport.vue";
 
 const PANEL_TITLES = {
   data: "Data",
@@ -113,7 +113,11 @@ onMounted(async () => {
     >
       <!-- Ported panels render their own header. -->
       <div
-        v-if="!['data', 'stops', 'routes', 'streets'].includes(store.activePanel)"
+        v-if="
+          !['data', 'stops', 'routes', 'streets', 'validate'].includes(
+            store.activePanel,
+          )
+        "
         class="panel-title"
       >
         {{ PANEL_TITLES[store.activePanel] }}
@@ -155,10 +159,7 @@ onMounted(async () => {
 
       <StreetsPanel v-show="store.activePanel === 'streets'" />
 
-      <div v-show="store.activePanel === 'validate'" class="legacy">
-        <CurrentFeedBar />
-        <ValidationReport />
-      </div>
+      <ValidatePanel v-show="store.activePanel === 'validate'" />
 
       <div v-show="store.activePanel === 'search'" class="legacy">
         <SearchPanel />
