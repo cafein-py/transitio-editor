@@ -18,8 +18,8 @@ import {
   loadSession,
   openBrowser,
   saveSession,
-  setShapeColorBy,
 } from "../actions.js";
+import { setShapeColorBy } from "../actions/mapView.js";
 import { toggleNetworkVisible } from "../actions/streets.js";
 import { groupedCatalogue } from "../catalogue.js";
 import { bboxLabel } from "../streets.js";

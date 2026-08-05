@@ -12,6 +12,7 @@ import { configureSession, sessionRedo, sessionUndo } from "./session.js";
 import { undoShortcut } from "./undo.js";
 import AppHeader from "./components/AppHeader.vue";
 import DataPanel from "./components/DataPanel.vue";
+import MapDisplayBar from "./components/MapDisplayBar.vue";
 import NavRail from "./components/NavRail.vue";
 import RoutesPanel from "./components/RoutesPanel.vue";
 import SessionDrawer from "./components/SessionDrawer.vue";
@@ -26,7 +27,6 @@ import MapToolbar from "./components/MapToolbar.vue";
 import AgencyServiceForm from "./components/AgencyServiceForm.vue";
 import CropPanel from "./components/CropPanel.vue";
 import CurrentFeedBar from "./components/CurrentFeedBar.vue";
-import RouteLegend from "./components/RouteLegend.vue";
 import SearchPanel from "./components/SearchPanel.vue";
 import StopInspector from "./components/StopInspector.vue";
 import TimetablePanel from "./components/TimetablePanel.vue";
@@ -122,7 +122,6 @@ onMounted(async () => {
       <div v-show="store.activePanel === 'data'">
         <DataPanel />
         <div class="legacy">
-          <RouteLegend />
           <CropPanel />
         </div>
       </div>
@@ -174,6 +173,7 @@ onMounted(async () => {
       <div class="map-wrap">
         <div id="map"></div>
         <div class="map-overlay top-left">
+          <MapDisplayBar />
           <button
             v-if="!store.editMode"
             class="mode-badge"

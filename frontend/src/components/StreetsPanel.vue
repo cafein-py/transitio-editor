@@ -12,7 +12,7 @@ import {
   toggleNetworkEditing,
   toggleNetworkVisible,
 } from "../actions/streets.js";
-import { toggleFeedVisible } from "../actions.js";
+import { toggleFeedVisible } from "../actions/mapView.js";
 import { waysData } from "../entities.js";
 import * as mapBridge from "../map.js";
 import { selectWay } from "../map/streets.js";
