@@ -14,6 +14,9 @@ export function sessionView(state, camera) {
     shape_color_by: state.shapeColorBy,
     stops_visible: state.stopsVisible,
     active_tab: state.workingPanel || "data",
+    // the user-given street-network name lives client-side only
+    network_name:
+      (state.network && state.network.displayName) || undefined,
   };
 }
 

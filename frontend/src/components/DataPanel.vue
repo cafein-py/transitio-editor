@@ -57,6 +57,32 @@ const activeCount = computed(
   () => store.catalogue.filter((feed) => feed.active).length,
 );
 
+// "Layers" spans the feeds AND the street network.
+const allShown = computed(
+  () =>
+    activeCount.value === store.catalogue.length &&
+    (!store.network.available || store.network.visible),
+);
+const allHidden = computed(
+  () =>
+    activeCount.value === 0 &&
+    (!store.network.available || !store.network.visible),
+);
+
+async function showAllLayers() {
+  await setFeedsActive(store.catalogue, true);
+  if (store.network.available && !store.network.visible) {
+    toggleNetworkVisible();
+  }
+}
+
+async function hideAllLayers() {
+  await setFeedsActive(store.catalogue, false);
+  if (store.network.available && store.network.visible) {
+    toggleNetworkVisible();
+  }
+}
+
 const tint = (hex, alpha) => {
   const n = parseInt(hex.slice(1), 16);
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
@@ -101,6 +127,22 @@ const osmName = computed(() => {
   const source = store.network.source;
   return source ? source.split("/").pop() : "OSM network";
 });
+
+const osmRenaming = ref(false);
+const osmDraft = ref("");
+
+function startOsmRename() {
+  osmDraft.value = osmName.value;
+  osmRenaming.value = true;
+}
+
+// The extract's name is display state (saved with the workspace), not a
+// server-side property — renaming needs no request.
+function commitOsmRename() {
+  const value = osmDraft.value.trim();
+  osmRenaming.value = false;
+  if (value) store.network.displayName = value;
+}
 
 const osmMeta = computed(() => {
   const parts = [];
@@ -158,12 +200,14 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
           Feed
         </button>
       </div>
-      <button
-        class="btn small"
-        :disabled="activeCount === store.catalogue.length"
-        @click="setFeedsActive(store.catalogue, true)"
-      >
-        Show all feeds
+    </div>
+
+    <div class="layer-row">
+      <button class="btn small" :disabled="allShown" @click="showAllLayers">
+        Show all layers
+      </button>
+      <button class="btn small" :disabled="allHidden" @click="hideAllLayers">
+        Hide all layers
       </button>
     </div>
 
@@ -292,15 +336,36 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
       >
         <Icon :name="store.network.visible ? 'eye' : 'eye-off'" />
       </button>
-      <span
-        class="osm-dot"
-        :class="{ bad: store.network.error }"
-        :title="store.network.error || null"
-      ></span>
+      <span class="osm-icon" :class="{ bad: store.network.error }">
+        <svg viewBox="0 0 18 18" fill="none" stroke="currentColor">
+          <path
+            d="M6 2.5v13M12 2.5v13M2.5 6h13M2.5 12h13"
+            stroke-width="1.5"
+            stroke-linecap="round"
+          />
+        </svg>
+      </span>
       <div class="osm-main">
-        <span class="osm-name" :title="store.network.source">
-          {{ osmName }}
-        </span>
+        <div class="osm-name-row">
+          <input
+            v-if="osmRenaming"
+            v-model="osmDraft"
+            class="rename"
+            @keyup.enter="commitOsmRename"
+            @keyup.escape="osmRenaming = false"
+            @blur="commitOsmRename"
+            @vue:mounted="({ el }) => el.focus()"
+          />
+          <span
+            v-else
+            class="osm-name"
+            :title="store.network.source + '\nDouble-click to rename'"
+            @dblclick="startOsmRename"
+          >
+            {{ osmName }}
+          </span>
+          <span class="osm-badge mono">OSM</span>
+        </div>
         <span v-if="osmMeta" class="mono osm-meta">{{ osmMeta }}</span>
       </div>
       <button
@@ -539,8 +604,13 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
   color: var(--ink);
   box-shadow: var(--shadow-thumb);
 }
-.view-row .btn {
-  margin-left: auto;
+.layer-row {
+  display: flex;
+  gap: 6px;
+}
+.layer-row .btn {
+  flex: 1;
+  justify-content: center;
 }
 
 .group {
@@ -665,33 +735,56 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
   display: flex;
   align-items: center;
   gap: 6px;
-  border: 1px solid var(--border-2);
+  border: 1px solid rgba(122, 79, 191, 0.28);
   border-radius: var(--r-card);
   padding: 7px 9px;
   background: var(--surface);
 }
-.osm-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--ok);
+.osm-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: rgba(122, 79, 191, 0.14);
+  color: #7a4fbf;
+  display: grid;
+  place-items: center;
   flex: none;
 }
-.osm-dot.bad {
-  background: var(--error);
+.osm-icon svg {
+  width: 13px;
+  height: 13px;
+}
+.osm-icon.bad {
+  background: rgba(184, 58, 58, 0.12);
+  color: var(--error);
 }
 .osm-main {
   flex: 1;
   min-width: 0;
 }
+.osm-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
 .osm-name {
-  display: block;
   font-size: 12.5px;
   font-weight: 550;
   line-height: 1.25;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  cursor: text;
+}
+.osm-badge {
+  font-size: 8.5px;
+  letter-spacing: 0.05em;
+  color: #7a4fbf;
+  background: rgba(122, 79, 191, 0.14);
+  border-radius: 4px;
+  padding: 2px 5px;
+  flex: none;
 }
 .osm-meta {
   display: block;

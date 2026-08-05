@@ -377,6 +377,9 @@ function applySessionView(view) {
     store.session.wsName = view.ws_name;
     store.session.named = true;
   }
+  if (typeof view.network_name === "string" && view.network_name) {
+    store.network.displayName = view.network_name;
+  }
   installRestoredLog(view.log);
   if (plan.camera) mapBridge.jumpTo(plan.camera.center, plan.camera.zoom);
   else if (plan.fit) mapBridge.fitToStops();

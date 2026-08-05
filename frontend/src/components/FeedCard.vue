@@ -1,7 +1,10 @@
 <script setup>
+import { ref } from "vue";
+
 import {
   endFeedDrag,
   removeFeed,
+  renameFeed,
   startFeedDrag,
   toggleEditTarget,
   toggleFeedActive,
@@ -11,7 +14,21 @@ import { MODES, UNKNOWN_MODE } from "../modes.js";
 import { store } from "../store.js";
 import Icon from "./Icon.vue";
 
-defineProps({ feed: { type: Object, required: true } });
+const props = defineProps({ feed: { type: Object, required: true } });
+
+const renaming = ref(false);
+const draft = ref("");
+
+function startRename() {
+  draft.value = props.feed.name;
+  renaming.value = true;
+}
+
+async function commitRename() {
+  const value = draft.value;
+  renaming.value = false;
+  await renameFeed(props.feed, value);
+}
 
 const ALL_MODES = [...MODES, UNKNOWN_MODE];
 const modeOf = (code) =>
@@ -48,7 +65,23 @@ const tint = (hex, alpha) => {
     <div class="feed-main">
       <div class="feed-name-row">
         <span class="swatch" :style="{ background: feed.color }"></span>
-        <span class="feed-name">{{ feed.name }}</span>
+        <input
+          v-if="renaming"
+          v-model="draft"
+          class="rename"
+          @keyup.enter="commitRename"
+          @keyup.escape="renaming = false"
+          @blur="commitRename"
+          @vue:mounted="({ el }) => el.focus()"
+        />
+        <span
+          v-else
+          class="feed-name"
+          title="Double-click to rename"
+          @dblclick="startRename"
+        >
+          {{ feed.name }}
+        </span>
       </div>
       <div v-if="(feed.modes || []).length" class="pills">
         <span
@@ -144,6 +177,19 @@ const tint = (hex, alpha) => {
   font-size: 12.5px;
   font-weight: 550;
   line-height: 1.25;
+  cursor: text;
+}
+.rename {
+  flex: 1;
+  min-width: 0;
+  font: 550 12.5px var(--sans);
+  border: 1px solid var(--accent-border);
+  border-radius: 5px;
+  padding: 1px 5px;
+  background: var(--surface);
+}
+.rename:focus {
+  outline: none;
 }
 .pills {
   display: flex;

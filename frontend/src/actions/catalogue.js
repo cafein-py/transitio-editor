@@ -209,6 +209,25 @@ export async function toggleEditTarget(feed) {
   if (!store.editMode) toggleEditMode();
 }
 
+export async function renameFeed(feed, rawName) {
+  const name = (rawName || "").trim();
+  if (!name || name === feed.name) return;
+  const path = `/api/catalogue/${encodeURIComponent(feed.feed_id)}`;
+  try {
+    await api("PATCH", path, { name });
+    logRequestEdit(
+      "Feed renamed",
+      `${feed.name} → ${name}`,
+      { method: "PATCH", path, body: { name: feed.name } },
+      { method: "PATCH", path, body: { name } },
+      feed.feed_id,
+    );
+    await loadCatalogue();
+  } catch (error) {
+    store.status = error.message;
+  }
+}
+
 export async function toggleFeedActive(feed) {
   try {
     await api("PATCH", `/api/catalogue/${encodeURIComponent(feed.feed_id)}`, {
