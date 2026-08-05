@@ -20,6 +20,7 @@ import RoutesPanel from "./components/RoutesPanel.vue";
 import SessionDrawer from "./components/SessionDrawer.vue";
 import StopsPanel from "./components/StopsPanel.vue";
 import StreetsPanel from "./components/StreetsPanel.vue";
+import TripsPanel from "./components/TripsPanel.vue";
 import ValidatePanel from "./components/ValidatePanel.vue";
 import WayCard from "./components/WayCard.vue";
 import Toasts from "./components/Toasts.vue";
@@ -28,11 +29,8 @@ import BasemapControl from "./components/BasemapControl.vue";
 import MapToolbar from "./components/MapToolbar.vue";
 /* Pre-redesign panels, hosted until each port step replaces them. */
 import CropPanel from "./components/CropPanel.vue";
-import CurrentFeedBar from "./components/CurrentFeedBar.vue";
 import SearchPanel from "./components/SearchPanel.vue";
 import StopInspector from "./components/StopInspector.vue";
-import TimetablePanel from "./components/TimetablePanel.vue";
-import TripForm from "./components/TripForm.vue";
 
 const PANEL_TITLES = {
   data: "Data",
@@ -113,22 +111,14 @@ onMounted(async () => {
       :class="{ narrow: store.layout === 'inspector' }"
     >
       <!-- Ported panels render their own header. -->
-      <div
-        v-if="
-          !['data', 'stops', 'routes', 'streets', 'validate', 'cal', 'agencies'].includes(
-            store.activePanel,
-          )
-        "
-        class="panel-title"
-      >
+      <!-- Only the legacy search panel still borrows the generic title. -->
+      <div v-if="store.activePanel === 'search'" class="panel-title">
         {{ PANEL_TITLES[store.activePanel] }}
       </div>
 
       <div v-show="store.activePanel === 'data'">
         <DataPanel />
-        <div class="legacy">
-          <CropPanel />
-        </div>
+        <CropPanel />
       </div>
 
       <StopsPanel v-show="store.activePanel === 'stops'" />
@@ -137,14 +127,7 @@ onMounted(async () => {
 
       <CalPanel v-show="store.activePanel === 'cal'" />
 
-      <div v-show="store.activePanel === 'trips'" class="legacy">
-        <CurrentFeedBar />
-        <TripForm v-if="store.editMode" />
-        <TimetablePanel v-if="store.editMode" />
-        <p v-if="!store.editMode" class="hint">
-          Turn on editing to work on trips and timetables.
-        </p>
-      </div>
+      <TripsPanel v-show="store.activePanel === 'trips'" />
 
       <AgenciesPanel v-show="store.activePanel === 'agencies'" />
 

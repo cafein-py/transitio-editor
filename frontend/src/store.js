@@ -163,17 +163,9 @@ export const store = reactive({
   status: "",
 });
 
-const defaultForms = () => ({
-  trip: {
-    route_id: "",
-    service_id: "",
-    trip_id: "",
-    shape_id: "",
-    start: "06:00:00",
-    end: "22:00:00",
-    headway: 600,
-  },
-});
+// Panel forms hold their own local state since the redesign; this stays
+// as the (now empty) reset hook until the last legacy form is gone.
+const defaultForms = () => ({});
 
 export const forms = reactive(defaultForms());
 

@@ -1145,6 +1145,28 @@ export function setSelectedShapes(shapeIds, feedId) {
   map.setFilter("shapes-selected", withModeFilter(selectedShapeFilter));
 }
 
+// The Trips route focus: the picked route's shapes stay bright, every
+// other shape drops to opacity .28.
+export function setRouteFocus(shapeIds, feedId) {
+  if (!map || !map.getLayer("shapes")) return;
+  if (!shapeIds || !shapeIds.length) {
+    map.setPaintProperty("shapes", "line-opacity", 1);
+    map.setPaintProperty("shapes-casing", "line-opacity", 0.9);
+    return;
+  }
+  const inFocus = [
+    "all",
+    ["in", ["get", "shape_id"], ["literal", [...shapeIds]]],
+    ...(feedId ? [["==", ["get", "feed_id"], feedId]] : []),
+  ];
+  map.setPaintProperty("shapes", "line-opacity", ["case", inFocus, 1, 0.28]);
+  map.setPaintProperty(
+    "shapes-casing",
+    "line-opacity",
+    ["case", inFocus, 0.9, 0.25],
+  );
+}
+
 export function clearFeedSelection() {
   setSelectedStop(null);
   setSelectedShape(null);

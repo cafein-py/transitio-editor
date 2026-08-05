@@ -4,6 +4,7 @@
 import { api } from "./api.js";
 import { loadCatalogue } from "./actions/catalogue.js";
 import { checkNetworkAvailable, invalidateResolve } from "./actions/streets.js";
+import { loadRouteTrips } from "./actions/trips.js";
 import {
   restoreSessionStatus,
   saveSessionStatus,
@@ -17,10 +18,8 @@ import {
   installRestoredLog,
   logServerEdit,
   sessionLogForSave,
-  sessionUndo,
 } from "./session.js";
-import { forms, resetForms, store } from "./store.js";
-import { pushToast } from "./toasts.js";
+import { resetForms, store } from "./store.js";
 
 export { startAoiDraw, clearAoi } from "./map.js";
 
@@ -147,102 +146,6 @@ export function startMovingStop() {
   mapBridge.setCursor("crosshair");
 }
 
-export const submitTrip = wrap(async () => {
-  await api("POST", "/api/trips/frequency", {
-    ...forms.trip,
-    shape_id: forms.trip.shape_id || null,
-    stops: store.tripStops.map((entry) => [entry.stopId, entry.offset]),
-  });
-  logServerEdit(
-    "Trips generated",
-    `${forms.trip.route_id} every ${forms.trip.headway}s`,
-  );
-  store.tripStops.length = 0;
-  forms.trip.trip_id = "";
-  await mapBridge.refreshAll(false);
-});
-
-
-export async function onTimetableToggle(open) {
-  if (!open) return;
-  try {
-    store.routes = (await api("GET", "/api/routes")).routes;
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-export async function loadTrips() {
-  store.trip = null;
-  try {
-    const route = encodeURIComponent(store.timetableRoute);
-    store.routeTrips = (await api("GET", `/api/routes/${route}/trips`)).trips;
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-export async function loadTrip(tripId) {
-  try {
-    store.trip = await api(
-      "GET",
-      `/api/trips/${encodeURIComponent(tripId)}/times`,
-    );
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-export const applyTripTimes = wrap(async () => {
-  const updates = {};
-  for (const row of store.trip.times) {
-    updates[row.stop_sequence] = {
-      arrival_time: row.arrival_time,
-      departure_time: row.departure_time,
-    };
-  }
-  await api(
-    "PUT",
-    `/api/trips/${encodeURIComponent(store.trip.trip_id)}/times`,
-    {
-      times: updates,
-    },
-  );
-  logServerEdit("Stop times applied", store.trip.trip_id);
-  await loadTrip(store.trip.trip_id);
-  await mapBridge.refreshSummary(); // the undo label just changed
-});
-
-export const deleteTrip = wrap(async () => {
-  const tripId = store.trip.trip_id;
-  await api("DELETE", `/api/trips/${encodeURIComponent(tripId)}`);
-  logServerEdit("Trip deleted", tripId);
-  pushToast({
-    title: "trip deleted",
-    body: tripId,
-    action: { label: "undo", run: sessionUndo },
-  });
-  store.trip = null;
-  await loadTrips();
-  await mapBridge.refreshAll(false);
-});
-
-export const shiftTrip = wrap(async () => {
-  await api(
-    "POST",
-    `/api/trips/${encodeURIComponent(store.trip.trip_id)}/shift`,
-    {
-      seconds: store.shiftSeconds,
-    },
-  );
-  logServerEdit(
-    "Trip shifted",
-    `${store.trip.trip_id} by ${store.shiftSeconds}s`,
-  );
-  await loadTrip(store.trip.trip_id);
-  await mapBridge.refreshSummary(); // the undo label just changed
-});
-
 // Interaction state (selection, drafts, timetable, report) is scoped to
 // the current feed; wipe it when the edit target changes so later actions
 // can't target entities from the previous feed.
@@ -261,6 +164,7 @@ export function resetFeedScopedState() {
   store.routes = [];
   store.services = [];
   store.agencies = [];
+  mapBridge.setRouteFocus([], null); // the picked route's dimming
   store.report = null;
   store.reportStale = false;
   store.saveResult = null;
@@ -416,10 +320,10 @@ export function cancelLoadSession() {
 export async function refreshAfterHistory() {
   await mapBridge.refreshAll(false);
   if (store.tableView.open) await loadTable();
-  if (store.timetableRoute) await loadTrips();
+  if (store.timetableRoute) await loadRouteTrips();
   if (store.trip) {
-    // fetched inline: loadTrip swallows its own errors, and a trip the
-    // undo removed must clear the stale editable detail, not keep it
+    // fetched inline: a trip the undo removed must clear the stale
+    // editable detail, not keep it
     try {
       store.trip = await api(
         "GET",
