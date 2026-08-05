@@ -25,6 +25,7 @@ import { groupedCatalogue } from "../catalogue.js";
 import { store } from "../store.js";
 import FeedCard from "./FeedCard.vue";
 import FileBrowser from "./FileBrowser.vue";
+import Icon from "./Icon.vue";
 
 const q = ref("");
 const collapsed = reactive(new Set());
@@ -171,7 +172,9 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
             )
           "
         >
-          ◉
+          <Icon
+            :name="section.all.some((feed) => feed.active) ? 'eye' : 'eye-off'"
+          />
         </button>
         <template v-if="renaming === section.name">
           <input
@@ -214,7 +217,7 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
           title="Remove the group; its feeds stay"
           @click="deleteGroup(section.name)"
         >
-          🗑
+          <Icon name="trash" />
         </button>
       </div>
 
@@ -262,7 +265,7 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
         :title="store.network.visible ? 'Hide from the map' : 'Show on the map'"
         @click="toggleNetworkVisible"
       >
-        ◉
+        <Icon :name="store.network.visible ? 'eye' : 'eye-off'" />
       </button>
       <span class="osm-dot"></span>
       <span class="mono osm-name" :title="store.network.source">
@@ -557,9 +560,13 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
   background: none;
   color: var(--ink-2);
   cursor: pointer;
-  font-size: 12px;
   padding: 1px 2px;
   flex: none;
+}
+.eye svg {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 .eye.off {
   color: var(--ink-disabled);
@@ -601,6 +608,11 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
   padding: 2px 3px;
   border-radius: 5px;
   flex: none;
+}
+.tool svg {
+  width: 13px;
+  height: 13px;
+  display: block;
 }
 .tool:hover {
   color: var(--ink);

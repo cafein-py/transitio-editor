@@ -9,6 +9,7 @@ import {
 import { feedTableSummary } from "../catalogue.js";
 import { MODES, UNKNOWN_MODE } from "../modes.js";
 import { store } from "../store.js";
+import Icon from "./Icon.vue";
 
 defineProps({ feed: { type: Object, required: true } });
 
@@ -42,7 +43,7 @@ const tint = (hex, alpha) => {
       :title="feed.active ? 'Hide from the map' : 'Show on the map'"
       @click="toggleFeedActive(feed)"
     >
-      ◉
+      <Icon :name="feed.active ? 'eye' : 'eye-off'" />
     </button>
     <div class="feed-main">
       <div class="feed-name-row">
@@ -75,14 +76,14 @@ const tint = (hex, alpha) => {
       "
       @click="toggleEditTarget(feed)"
     >
-      ✎
+      <Icon name="pencil" />
     </button>
     <button
       class="tool"
       title="Remove from the workspace"
       @click="removeFeed(feed)"
     >
-      🗑
+      <Icon name="trash" />
     </button>
   </div>
 </template>
@@ -119,9 +120,13 @@ const tint = (hex, alpha) => {
   background: none;
   color: var(--ink-2);
   cursor: pointer;
-  font-size: 12px;
   padding: 3px 2px 1px;
   flex: none;
+}
+.eye svg {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 .eye.off {
   color: var(--ink-disabled);
@@ -165,10 +170,14 @@ const tint = (hex, alpha) => {
   background: none;
   color: var(--ink-5);
   cursor: pointer;
-  font-size: 11px;
-  padding: 2px 3px;
+  padding: 3px;
   border-radius: 5px;
   flex: none;
+}
+.tool svg {
+  width: 13px;
+  height: 13px;
+  display: block;
 }
 .tool:hover {
   color: var(--ink);
