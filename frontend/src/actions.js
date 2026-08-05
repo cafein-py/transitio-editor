@@ -499,6 +499,7 @@ export const updateInspectedStop = wrap(async () => {
 export function closeInspector() {
   store.inspector = null;
   store.movingStop = null;
+  store.selectedStopId = null;
   mapBridge.setSelectedStop(null); // the halo follows the selection
 }
 
@@ -507,17 +508,6 @@ export function startMovingStop() {
   store.status = `click the new location of ${store.movingStop}`;
   mapBridge.setCursor("crosshair");
 }
-
-export const submitRoute = wrap(async () => {
-  await api("POST", "/api/routes", {
-    ...forms.route,
-    agency_id: forms.route.agency_id || null,
-  });
-  logServerEdit("Route added", forms.route.route_id);
-  forms.route.route_id = "";
-  forms.route.route_short_name = "";
-  await mapBridge.refreshAll(false);
-});
 
 export const submitTrip = wrap(async () => {
   await api("POST", "/api/trips/frequency", {
@@ -643,6 +633,8 @@ export const shiftTrip = wrap(async () => {
 export function resetFeedScopedState() {
   setMode("select"); // also clears movingStop and the draw preview
   store.inspector = null;
+  store.selectedStopId = null;
+  store.selectedRouteId = null;
   mapBridge.clearFeedSelection();
   resetTableView();
   store.tripStops.length = 0;

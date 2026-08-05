@@ -16,6 +16,10 @@ export const store = reactive({
   activePanel: "data",
   layout: "sidebar", // header layout switcher: "sidebar" | "inspector" | "table"
   dirty: false, // edits since the workspace was last saved (header dot)
+  dataVersion: 0, // bumped on layer refresh; panel lists recompute off it
+  mapMoved: 0, // bumped on map moveend, for the "In map view" scope
+  selectedStopId: null, // { stopId, feedId } — two-way with the Stops list
+  selectedRouteId: null, // route of the current feed picked in the Routes list
   basemap: DEFAULT_BASEMAP, // background tile style, switchable on the map
   editMode: false, // map features of the current feed editable
   tableView: {
@@ -150,7 +154,6 @@ export const store = reactive({
 });
 
 const defaultForms = () => ({
-  route: { route_id: "", route_short_name: "", route_type: 3, agency_id: "" },
   trip: {
     route_id: "",
     service_id: "",

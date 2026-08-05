@@ -6,6 +6,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 
 import { api } from "./api.js";
 import { BASEMAPS, basemapLayerId } from "./basemaps.js";
+import { setStopsData } from "./entities.js";
 import { logPlain, logRequestEdit, logServerEdit, NETWORK_FEED } from "./session.js";
 import { SNAP_FILTERS, store } from "./store.js";
 import { cropShapeFromRing } from "./catalogue.js";
@@ -380,6 +381,8 @@ async function refreshLayers(fit) {
   lastStops = stops;
   map.getSource("stops").setData(stops);
   map.getSource("shapes").setData(shapes);
+  setStopsData(stops.features);
+  store.dataVersion += 1; // panel lists recompute
   // The legend offers only modes the loaded feeds actually contain.
   store.presentModes = presentModeCodes(shapes.features);
   if (fit && stops.features.length) {
@@ -529,6 +532,10 @@ export function createMap() {
     zoom: 11,
   });
   map.addControl(new maplibregl.NavigationControl());
+  // The "In map view" list scope recomputes off this counter.
+  map.on("moveend", () => {
+    store.mapMoved += 1;
+  });
 
   map.on("load", async () => {
     syncBasemapLayers(); // a choice made before the style built lands now
@@ -828,6 +835,12 @@ export function createMap() {
         store.inspector = {
           stopId: properties.stop_id,
           name: properties.stop_name || "",
+          feedId: properties.feed_id || null,
+        };
+        // Selection state only: panels react to it in place — a map
+        // click never navigates away from the panel in use.
+        store.selectedStopId = {
+          stopId: properties.stop_id,
           feedId: properties.feed_id || null,
         };
         setSelectedStop(properties);
@@ -1251,12 +1264,21 @@ export function setSelectedStop(properties) {
 }
 
 export function setSelectedShape(properties) {
+  setSelectedShapes(
+    properties ? [properties.shape_id] : [],
+    properties ? properties.feed_id : null,
+  );
+}
+
+// The amber halo over one or many shapes (a route's geometry is all the
+// shapes its trips reference).
+export function setSelectedShapes(shapeIds, feedId) {
   if (!map || !map.getLayer("shapes-selected")) return;
-  selectedShapeFilter = properties
+  selectedShapeFilter = shapeIds && shapeIds.length
     ? [
         "all",
-        ["==", ["get", "shape_id"], properties.shape_id],
-        ["==", ["get", "feed_id"], properties.feed_id],
+        ["in", ["get", "shape_id"], ["literal", [...shapeIds]]],
+        ...(feedId ? [["==", ["get", "feed_id"], feedId]] : []),
       ]
     : NO_SELECTION;
   map.setFilter("shapes-selected", withModeFilter(selectedShapeFilter));
