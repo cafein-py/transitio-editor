@@ -28,7 +28,6 @@ import { store } from "../store.js";
 import { useEntityList } from "../composables/useEntityList.js";
 import HighwayLegend from "./HighwayLegend.vue";
 import ListPager from "./ListPager.vue";
-import WayCard from "./WayCard.vue";
 
 // The panel retries the eager startup load (no-op once loaded).
 watch(
@@ -87,13 +86,6 @@ const list = useEntityList({
   items: visibleRows,
   fields: (row) => [row.name, String(row.id)],
   noun: "ways",
-});
-
-const selectedLength = computed(() => {
-  const selected = store.network.selected;
-  if (!selected) return null;
-  const row = rows.value.find((entry) => entry.id === selected.id);
-  return row ? row.km : null;
 });
 
 function selectRow(row) {
@@ -206,8 +198,6 @@ const acquireOpen = ref(false);
     />
 
     <HighwayLegend :counts="counts" />
-
-    <WayCard :length-km="selectedLength" />
 
     <ListPager
       :label="list.label.value"

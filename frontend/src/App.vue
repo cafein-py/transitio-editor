@@ -17,6 +17,7 @@ import RoutesPanel from "./components/RoutesPanel.vue";
 import SessionDrawer from "./components/SessionDrawer.vue";
 import StopsPanel from "./components/StopsPanel.vue";
 import StreetsPanel from "./components/StreetsPanel.vue";
+import WayCard from "./components/WayCard.vue";
 import Toasts from "./components/Toasts.vue";
 import AttributeTable from "./components/AttributeTable.vue";
 import BasemapControl from "./components/BasemapControl.vue";
@@ -197,6 +198,7 @@ onMounted(async () => {
         </div>
         <div class="map-overlay top-right">
           <StopInspector v-if="feedPanel" />
+          <WayCard v-if="store.activePanel === 'streets'" />
         </div>
         <div class="map-overlay bottom-left">
           <BasemapControl />
