@@ -17,8 +17,9 @@ dependencies = [
     # the editor uses transitio.edit, which first ships in core 0.2.
     # custom-filter snapping (snap_to_network custom_filter) needs 0.3;
     # catalogue merging needs transitio.gtfs.merge_tables from 0.5;
-    # cropping to a drawn polygon needs polygon-true crop_feed from 0.6
-    "transitio>=0.6",
+    # cropping needs polygon-true crop_feed from 0.6; undo/redo and the
+    # change-log sidecar need the logged primitives from 0.7
+    "transitio>=0.7",
     "uvicorn>=0.29",
 ]
 classifiers = [

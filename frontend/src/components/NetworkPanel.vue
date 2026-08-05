@@ -38,8 +38,12 @@ const selected = computed(() => store.network.selected);
 const selectedTags = computed(() =>
   selected.value ? networkTags(selected.value) : [],
 );
-const isWay = computed(() => selected.value && selected.value.osm_type === "way");
-const isNode = computed(() => selected.value && selected.value.osm_type === "node");
+const isWay = computed(
+  () => selected.value && selected.value.osm_type === "way",
+);
+const isNode = computed(
+  () => selected.value && selected.value.osm_type === "node",
+);
 
 const tagKey = ref("");
 const tagValue = ref("");
@@ -131,7 +135,9 @@ const savePath = ref("edited.osm.pbf");
             :disabled="store.network.acquire.downloading"
             @click="acquireOsm(false)"
           >
-            {{ store.network.acquire.downloading ? "downloading…" : "Download" }}
+            {{
+              store.network.acquire.downloading ? "downloading…" : "Download"
+            }}
           </button>
           <button
             :disabled="store.network.acquire.downloading"
@@ -195,8 +201,10 @@ const savePath = ref("edited.osm.pbf");
 
       <div v-if="store.network.mode === 'draw-way'" class="net-draw">
         <p class="hint">
-          Click the map to add points; click a node or way to connect to it
-          ({{ store.network.draw.length }} points).
+          Click the map to add points; click a node or way to connect to it ({{
+            store.network.draw.length
+          }}
+          points).
         </p>
         <div class="net-retag">
           <input v-model="drawTagKey" placeholder="tag key" />
@@ -246,7 +254,10 @@ const savePath = ref("edited.osm.pbf");
           </form>
         </template>
       </div>
-      <p v-else-if="store.network.loaded && store.network.mode === 'select'" class="hint">
+      <p
+        v-else-if="store.network.loaded && store.network.mode === 'select'"
+        class="hint"
+      >
         click a node or way to inspect or edit it.
       </p>
 

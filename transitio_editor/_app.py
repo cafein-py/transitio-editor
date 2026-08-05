@@ -539,6 +539,50 @@ def create_app(
     def index():
         return (static_dir / "index.html").read_text(encoding="utf-8")
 
+    def _history_editor(payload):
+        # the caller names the feed its label came from, so a feed switch
+        # racing the request cannot make it act on a different feed
+        feed_id = payload.get("feed_id")
+        if feed_id is not None and feed_id != registry.current:
+            raise HTTPException(409, "the current feed changed; refresh first")
+        return current_editor()
+
+    @app.post("/api/undo")
+    def undo_current(payload: dict = Body(default={})):
+        from transitio.exceptions import ChangeLogDesyncError
+
+        with lock:
+            editor = _history_editor(payload)
+            try:
+                label = editor.undo()
+            except ChangeLogDesyncError as error:
+                raise HTTPException(409, str(error)) from None
+            if label is None:
+                raise HTTPException(409, "nothing to undo")
+            return {
+                "undone": label,
+                "undo": editor.undo_label,
+                "redo": editor.redo_label,
+            }
+
+    @app.post("/api/redo")
+    def redo_current(payload: dict = Body(default={})):
+        from transitio.exceptions import ChangeLogDesyncError
+
+        with lock:
+            editor = _history_editor(payload)
+            try:
+                label = editor.redo()
+            except ChangeLogDesyncError as error:
+                raise HTTPException(409, str(error)) from None
+            if label is None:
+                raise HTTPException(409, "nothing to redo")
+            return {
+                "redone": label,
+                "undo": editor.undo_label,
+                "redo": editor.redo_label,
+            }
+
     @app.get("/api/feed")
     def feed_summary():
         with lock:
@@ -552,6 +596,8 @@ def create_app(
                 "snapAvailable": osm_state["source"] is not None,
                 "tables": {},
                 "currentFeedId": None,
+                "undo": None,
+                "redo": None,
             }
         return {
             "source": entry.source,
@@ -560,6 +606,9 @@ def create_app(
                 name: len(table) for name, table in sorted(entry.editor.tables.items())
             },
             "currentFeedId": entry.feed_id,
+            # what the next undo/redo would act on, for the GUI's buttons
+            "undo": entry.editor.undo_label,
+            "redo": entry.editor.redo_label,
         }
 
     @app.get("/api/tables/{name}")
@@ -934,7 +983,10 @@ def create_app(
         try:
             with lock, tempfile.TemporaryDirectory() as scratch:
                 report = current_editor().save(
-                    os.path.join(scratch, "current.zip"), check=False, **payload
+                    os.path.join(scratch, "current.zip"),
+                    check=False,
+                    change_log=False,
+                    **payload,
                 )
         except (TypeError, ValueError) as error:
             raise HTTPException(422, str(error)) from None
@@ -1095,7 +1147,8 @@ def create_app(
         except FileExistsError:
             raise HTTPException(422, f"{temp} already exists") from None
         try:
-            editor.save(temp, check=False)
+            # session storage, not a user save: no change-log sidecar
+            editor.save(temp, check=False, change_log=False)
             os.link(temp, target)
         except FileExistsError:
             raise HTTPException(422, f"{target} already exists") from None
@@ -1545,7 +1598,7 @@ def create_app(
                     staged = os.path.join(scratch, f"in-{index}.zip")
                     cropped = os.path.join(scratch, f"out-{index}.zip")
                     try:
-                        entry.editor.save(staged, check=False)
+                        entry.editor.save(staged, check=False, change_log=False)
                         crop_feed(
                             staged, cropped, aoi=area, full_trips_only=full_trips_only
                         )

@@ -12,7 +12,9 @@ const counts = computed(() => severityCounts(store.report));
 const rowCounts = computed(() =>
   store.report ? Object.entries(store.report.row_counts || {}) : [],
 );
-const serviceWindow = computed(() => store.report && store.report.service_window);
+const serviceWindow = computed(
+  () => store.report && store.report.service_window,
+);
 
 const expandedGroup = ref(null);
 function toggleGroup(id) {
@@ -31,7 +33,9 @@ const feedName = computed(() => {
   <div class="report">
     <div class="panel">
       <button @click="validateFeed">Validate</button>
-      <span v-if="store.reportStale" class="hint">edited since — revalidate</span>
+      <span v-if="store.reportStale" class="hint"
+        >edited since — revalidate</span
+      >
     </div>
 
     <div v-if="!store.report" class="panel hint">
@@ -60,7 +64,9 @@ const feedName = computed(() => {
       </details>
 
       <div class="panel">
-        <div v-if="!groups.length" class="hint">no notices — the feed is clean</div>
+        <div v-if="!groups.length" class="hint">
+          no notices — the feed is clean
+        </div>
         <div v-for="group in groups" :key="group.id" class="notice">
           <div
             class="notice-head"

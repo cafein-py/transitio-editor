@@ -3108,3 +3108,85 @@ def test_failed_session_save_keeps_the_previous_one(tmp_path):
     restored = fresh.post("/api/session/restore", json={"path": str(session)})
     assert restored.status_code == 200
     assert json_module.loads(session.read_text())["transitio_editor_session"] == 1
+
+
+def test_undo_redo_endpoints(editor):
+    client = TestClient(create_app(editor))
+    # nothing to undo on a freshly loaded feed
+    assert client.post("/api/undo").status_code == 409
+    assert client.post("/api/redo").status_code == 409
+    summary = client.get("/api/feed").json()
+    assert summary["undo"] is None and summary["redo"] is None
+
+    assert (
+        client.patch("/api/stops/s1", json={"stop_name": "Renamed"}).status_code == 200
+    )
+    summary = client.get("/api/feed").json()
+    assert summary["undo"] == "update_stop" and summary["redo"] is None
+
+    # a stale feed id is refused rather than acting on the wrong feed
+    assert client.post("/api/undo", json={"feed_id": "feed-99"}).status_code == 409
+    undone = client.post("/api/undo").json()
+    assert undone["undone"] == "update_stop"
+    assert undone["undo"] is None and undone["redo"] == "update_stop"
+    rows = client.get("/api/tables/stops.txt").json()["rows"]
+    assert "Renamed" not in {row["stop_name"] for row in rows}
+
+    redone = client.post("/api/redo").json()
+    assert redone["redone"] == "update_stop"
+    rows = client.get("/api/tables/stops.txt").json()["rows"]
+    assert "Renamed" in {row["stop_name"] for row in rows}
+
+
+def test_timetable_edits_are_single_undo_steps(editor):
+    client = TestClient(create_app(editor))
+    # set_trip_times spans several cells; one undo reverts them all
+    assert (
+        client.put(
+            "/api/trips/t1/times",
+            json={
+                "times": {
+                    "1": {"arrival_time": "07:00:00", "departure_time": "07:00:00"},
+                    "2": {"arrival_time": "07:09:00", "departure_time": "07:09:00"},
+                }
+            },
+        ).status_code
+        == 200
+    )
+    assert client.get("/api/feed").json()["undo"] == "set_trip_times"
+    client.post("/api/undo")
+    times = client.get("/api/tables/stop_times.txt").json()["rows"]
+    assert {row["arrival_time"] for row in times} == {"06:00:00", "06:05:00"}
+
+    # drop_trip cascades trips + stop_times + frequencies; one undo restores
+    before = client.get("/api/feed").json()["tables"]
+    assert client.delete("/api/trips/t1").status_code == 200
+    assert client.get("/api/feed").json()["tables"]["stop_times.txt"] == 0
+    assert client.get("/api/feed").json()["undo"] == "drop_trip"
+    client.post("/api/undo")
+    assert client.get("/api/feed").json()["tables"] == before
+
+
+def test_undo_reports_desync_as_conflict(editor):
+    client = TestClient(create_app(editor))
+    client.patch("/api/stops/s1", json={"stop_name": "Renamed"})
+    # sabotage through the escape hatch, as a direct API cannot
+    editor.tables["stops.txt"].iat[0, 1] = "meddled"
+    response = client.post("/api/undo")
+    assert response.status_code == 409
+    assert "change log" in response.json()["detail"]
+
+
+def test_gui_save_writes_the_change_sidecar(editor, tmp_path):
+    client = TestClient(create_app(editor))
+    client.patch("/api/stops/s1", json={"stop_name": "Renamed"})
+    target = tmp_path / "edited.zip"
+    assert (
+        client.post("/api/save", json={"path": str(target), "check": False}).status_code
+        == 200
+    )
+    sidecar = tmp_path / "edited.changes.txt"
+    assert sidecar.exists()
+    lines = sidecar.read_text().strip().splitlines()
+    assert lines[0].startswith("sequence,")
+    assert ",meta," in lines[-1]
