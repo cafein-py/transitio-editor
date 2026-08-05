@@ -751,20 +751,40 @@ export function createMap() {
       },
       "shapes",
     );
-    map.addLayer(
-      {
-        id: "stops-selected",
-        type: "circle",
-        source: "stops",
-        filter: NO_SELECTION,
-        paint: {
-          "circle-radius": stopRadius(2.6),
-          "circle-color": SELECT_COLOR,
-          "circle-opacity": 0.9,
-        },
+    // The stop halo sits ABOVE the stops layer: an underlay would be
+    // buried by neighbouring stops in dense areas. The selected stop is
+    // then redrawn enlarged on top of its own halo.
+    map.addLayer({
+      id: "stops-selected",
+      type: "circle",
+      source: "stops",
+      filter: NO_SELECTION,
+      paint: {
+        "circle-radius": stopRadius(2.6),
+        "circle-color": SELECT_COLOR,
+        "circle-opacity": 0.9,
       },
-      "stops",
-    );
+    });
+    map.addLayer({
+      id: "stops-selected-marker",
+      type: "circle",
+      source: "stops",
+      filter: NO_SELECTION,
+      paint: {
+        "circle-radius": stopRadius(1.45),
+        "circle-color": ["coalesce", ["get", "feed_color"], "#e67e22"],
+        "circle-stroke-color": "#fff",
+        "circle-stroke-width": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          7,
+          0.8,
+          13,
+          2,
+        ],
+      },
+    });
     map.addLayer(
       {
         id: "network-ways-selected",
@@ -1237,30 +1257,29 @@ export function setFeedVisible(visible) {
   );
   // Stops track both toggles: the feed group and the stops switch.
   setGroupVisible(
-    ["stops", "stops-highlight", "stops-selected"],
+    ["stops", "stops-highlight", "stops-selected", "stops-selected-marker"],
     visible && store.stopsVisible,
   );
 }
 
 export function setStopsVisible(visible) {
   setGroupVisible(
-    ["stops", "stops-highlight", "stops-selected"],
+    ["stops", "stops-highlight", "stops-selected", "stops-selected-marker"],
     store.feedVisible && visible,
   );
 }
 
 export function setSelectedStop(properties) {
   if (!map || !map.getLayer("stops-selected")) return;
-  map.setFilter(
-    "stops-selected",
-    properties
-      ? [
-          "all",
-          ["==", ["get", "stop_id"], properties.stop_id],
-          ["==", ["get", "feed_id"], properties.feed_id],
-        ]
-      : NO_SELECTION,
-  );
+  const filter = properties
+    ? [
+        "all",
+        ["==", ["get", "stop_id"], properties.stop_id],
+        ["==", ["get", "feed_id"], properties.feed_id],
+      ]
+    : NO_SELECTION;
+  map.setFilter("stops-selected", filter);
+  map.setFilter("stops-selected-marker", filter);
 }
 
 export function setSelectedShape(properties) {
