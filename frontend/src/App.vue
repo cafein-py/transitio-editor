@@ -7,9 +7,12 @@ import { createMap } from "./map.js";
 import {
   checkNetworkAvailable,
   loadCatalogue,
+  redoEdit,
   toggleEditMode,
   toggleTableView,
+  undoEdit,
 } from "./actions.js";
+import { undoShortcut } from "./undo.js";
 import AgencyServiceForm from "./components/AgencyServiceForm.vue";
 import AttributeTable from "./components/AttributeTable.vue";
 import CataloguePanel from "./components/CataloguePanel.vue";
@@ -37,6 +40,23 @@ watch(
     if (tab !== "catalogue") store.workingTab = tab;
   },
 );
+
+// Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (or +Y) act while editing on the map;
+// keystrokes inside form fields stay with the field.
+window.addEventListener("keydown", (event) => {
+  if (!store.editMode || store.activeTab !== "view") return;
+  const kind = undoShortcut({
+    key: event.key,
+    ctrlKey: event.ctrlKey,
+    metaKey: event.metaKey,
+    shiftKey: event.shiftKey,
+    targetTag: event.target && event.target.tagName,
+  });
+  if (!kind) return;
+  event.preventDefault();
+  if (kind === "undo") undoEdit();
+  else redoEdit();
+});
 
 onMounted(async () => {
   createMap();

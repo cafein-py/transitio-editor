@@ -547,6 +547,7 @@ export const applyTripTimes = wrap(async () => {
     },
   );
   await loadTrip(store.trip.trip_id);
+  await mapBridge.refreshSummary(); // the undo label just changed
 });
 
 export const deleteTrip = wrap(async () => {
@@ -565,6 +566,7 @@ export const shiftTrip = wrap(async () => {
     },
   );
   await loadTrip(store.trip.trip_id);
+  await mapBridge.refreshSummary(); // the undo label just changed
 });
 
 // Overlapping reloads (a drop while another mutation settles) must not
@@ -701,6 +703,8 @@ function resetFeedScopedState() {
   store.report = null;
   store.reportStale = false;
   store.saveResult = null;
+  store.undoLabel = null; // the old feed's labels must not stay actionable
+  store.redoLabel = null;
   resetForms();
   mapBridge.clearHighlight();
 }
@@ -893,6 +897,67 @@ export async function confirmLoadSession() {
 
 export function cancelLoadSession() {
   store.session.confirm = null;
+}
+
+// Undo/redo against the current feed; the server peeks the labels.
+let undoBusy = false;
+
+// Every feed-scoped view must reflect the reverted tables: stale
+// editable values (an open timetable, the attribute table) could
+// otherwise be saved back, silently re-applying what was just undone.
+async function refreshAfterHistory() {
+  await mapBridge.refreshAll(false);
+  if (store.tableView.open) await loadTable();
+  if (store.timetableRoute) await loadTrips();
+  if (store.trip) {
+    // fetched inline: loadTrip swallows its own errors, and a trip the
+    // undo removed must clear the stale editable detail, not keep it
+    try {
+      store.trip = await api(
+        "GET",
+        `/api/trips/${encodeURIComponent(store.trip.trip_id)}/times`,
+      );
+    } catch (error) {
+      store.trip = null;
+    }
+  }
+  closeInspector(); // its stop may no longer exist or match
+}
+
+async function runHistory(path, verb) {
+  if (undoBusy) return;
+  undoBusy = true;
+  try {
+    let body;
+    try {
+      // the feed id pins the request to the feed the label came from
+      body = await api("POST", path, { feed_id: store.currentFeedId });
+    } catch (error) {
+      store.status = error.message;
+      return;
+    }
+    // committed: report it as done even if the refresh below hiccups —
+    // a refresh error must not read as "the undo failed, try again"
+    const label = body.undone ?? body.redone;
+    store.status = `${verb} ${label}`;
+    try {
+      await refreshAfterHistory();
+    } catch (error) {
+      store.status = `${verb} ${label} — refresh failed: ${error.message}`;
+    }
+  } finally {
+    undoBusy = false;
+  }
+}
+
+export async function undoEdit() {
+  if (!store.undoLabel) return;
+  await runHistory("/api/undo", "undid");
+}
+
+export async function redoEdit() {
+  if (!store.redoLabel) return;
+  await runHistory("/api/redo", "redid");
 }
 
 export function toggleMergeSelected(feed) {

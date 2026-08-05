@@ -1,8 +1,8 @@
-"""Trip-level timetable operations over a FeedEditor's tables.
+"""Timetable listing and editing for the GUI.
 
-These mutate the editor's pandas tables directly (the documented escape
-hatch of ``transitio.FeedBuilder``); save-time validation remains the
-correctness net.
+Read helpers shape the route/trip/stop-times views; the mutation
+helpers route through the core editor's logged primitives inside
+``action()`` contexts, so every timetable edit is one undoable step.
 """
 
 from __future__ import annotations
@@ -147,9 +147,12 @@ def set_trip_times(editor, trip_id, updates):
                 raw = str(entry[column]).strip()
                 value = "" if raw == "" else format_time(parse_time(raw))
                 normalized.append((str(sequence), column, value))
-    for sequence, column, value in normalized:
-        row_mask = mask & (times["stop_sequence"].astype(str) == sequence)
-        times.loc[row_mask, column] = value
+    # through the logged primitives, so a timetable edit is one undo step
+    with editor.action("set_trip_times"):
+        for sequence, column, value in normalized:
+            row_mask = mask & (times["stop_sequence"].astype(str) == sequence)
+            for position in row_mask.to_numpy().nonzero()[0]:
+                editor.set_value("stop_times.txt", int(position), column, value)
 
 
 def drop_trip(editor, trip_id):
@@ -157,23 +160,26 @@ def drop_trip(editor, trip_id):
     trips = editor.tables.get("trips.txt")
     if trips is None or not (trips["trip_id"] == str(trip_id)).any():
         raise LookupError(f"no trip {trip_id!r}")
-    editor.tables["trips.txt"] = trips[trips["trip_id"] != str(trip_id)].reset_index(
-        drop=True
-    )
-    for filename, columns in (
-        ("stop_times.txt", ("trip_id",)),
-        ("frequencies.txt", ("trip_id",)),
-        ("attributions.txt", ("trip_id",)),
-        ("transfers.txt", ("from_trip_id", "to_trip_id")),
-    ):
-        table = editor.tables.get(filename)
-        if table is None:
-            continue
-        keep = None
-        for column in columns:
-            if column not in table.columns:
+    # through the logged primitives, so the whole cascade is one undo step
+    with editor.action("drop_trip"):
+        for filename, columns in (
+            ("trips.txt", ("trip_id",)),
+            ("stop_times.txt", ("trip_id",)),
+            ("frequencies.txt", ("trip_id",)),
+            ("attributions.txt", ("trip_id",)),
+            ("transfers.txt", ("from_trip_id", "to_trip_id")),
+        ):
+            table = editor.tables.get(filename)
+            if table is None:
                 continue
-            match = table[column] == str(trip_id)
-            keep = ~match if keep is None else keep & ~match
-        if keep is not None:
-            editor.tables[filename] = table[keep].reset_index(drop=True)
+            gone = None
+            for column in columns:
+                if column not in table.columns:
+                    continue
+                match = table[column] == str(trip_id)
+                gone = match if gone is None else gone | match
+            if gone is None:
+                continue
+            positions = [int(p) for p in gone.to_numpy().nonzero()[0]]
+            if positions:
+                editor.delete_rows(filename, positions)

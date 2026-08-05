@@ -79,6 +79,8 @@ export const store = reactive({
   tripPicking: false,
   saving: false,
   saveResult: null, // { clean, message }
+  undoLabel: null, // what the next undo would revert (server-peeked)
+  redoLabel: null,
   routes: [],
   timetableRoute: "",
   routeTrips: [],

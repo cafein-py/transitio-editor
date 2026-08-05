@@ -342,6 +342,8 @@ async function refreshSummary() {
   store.tables = summary.tables;
   store.currentFeedId = summary.currentFeedId ?? null;
   store.snapAvailable = Boolean(summary.snapAvailable);
+  store.undoLabel = summary.undo ?? null;
+  store.redoLabel = summary.redo ?? null;
   // Keep the current feed's catalogue counts in step with its table sizes
   // so the Catalogue tab doesn't show stale counts after a mutation.
   const entry = store.catalogue.find((f) => f.feed_id === store.currentFeedId);
@@ -352,6 +354,12 @@ async function refreshSummary() {
     const catalogue = await api("GET", "/api/catalogue");
     if (seq !== summarySeq) return;
     store.catalogue = catalogue.feeds;
+    if (catalogue.current !== store.currentFeedId) {
+      // the current feed changed between the two samples: the labels
+      // above belong to the OLD feed and must not stay actionable
+      store.undoLabel = null;
+      store.redoLabel = null;
+    }
     store.currentFeedId = catalogue.current;
   } catch (error) {
     /* summary already updated; catalogue refresh is best-effort */
