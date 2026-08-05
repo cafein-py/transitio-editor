@@ -169,9 +169,8 @@ onMounted(async () => {
         <SearchPanel />
       </div>
 
-      <div class="legacy">
-        <StopInspector v-if="feedPanel && store.activePanel !== 'search'" />
-        <div v-if="store.status" id="status">{{ store.status }}</div>
+      <div v-if="store.status" class="legacy">
+        <div id="status">{{ store.status }}</div>
       </div>
     </aside>
 
@@ -200,6 +199,9 @@ onMounted(async () => {
             >
           </div>
           <MapToolbar />
+        </div>
+        <div class="map-overlay top-right">
+          <StopInspector v-if="feedPanel" />
         </div>
         <div class="map-overlay bottom-right">
           <BasemapControl />

@@ -74,8 +74,15 @@ body {
   left: 10px;
   align-items: flex-start;
 }
+.map-overlay.top-right {
+  top: 10px;
+  right: 10px;
+  align-items: flex-end;
+  max-height: calc(100% - 60px);
+}
 .map-overlay.bottom-right {
-  bottom: 22px;
+  /* above MapLibre's bottom-right zoom control */
+  bottom: 108px;
   right: 10px;
   align-items: flex-end;
 }

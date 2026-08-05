@@ -537,7 +537,8 @@ export function createMap() {
     center: [24.94, 60.17],
     zoom: 11,
   });
-  map.addControl(new maplibregl.NavigationControl());
+  // Bottom-right: the floating stop card owns the map's top-right corner.
+  map.addControl(new maplibregl.NavigationControl(), "bottom-right");
   // The "In map view" list scope recomputes off this counter.
   map.on("moveend", () => {
     store.mapMoved += 1;

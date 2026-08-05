@@ -484,18 +484,6 @@ export const finishShape = wrap(async () => {
   await mapBridge.refreshAll(false);
 });
 
-export const updateInspectedStop = wrap(async () => {
-  await api(
-    "PATCH",
-    `/api/stops/${encodeURIComponent(store.inspector.stopId)}`,
-    {
-      stop_name: store.inspector.name,
-    },
-  );
-  logServerEdit("Stop renamed", store.inspector.stopId);
-  await mapBridge.refreshAll(false);
-});
-
 export function closeInspector() {
   store.inspector = null;
   store.movingStop = null;
