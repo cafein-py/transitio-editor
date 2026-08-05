@@ -41,7 +41,19 @@ const ITEMS = [
           <path d="M2.8 7.4h12.4M6 2v3M12 2v3" stroke-width="1.5" stroke-linecap="round" />
         </template>
         <template v-else-if="item.key === 'trips'">
-          <circle cx="9" cy="9" r="4.6" fill="currentColor" stroke="none" />
+          <!-- a run from stop A to stop B -->
+          <circle cx="4.4" cy="13.6" r="2" fill="currentColor" stroke="none" />
+          <path
+            d="M6.2 11.8C9 9 9 9 12.4 5.6"
+            stroke-width="1.7"
+            stroke-linecap="round"
+          />
+          <path
+            d="M9.6 4.4h4v4"
+            stroke-width="1.7"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
         </template>
         <template v-else-if="item.key === 'agencies'">
           <path
