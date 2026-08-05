@@ -57,6 +57,9 @@ export const store = reactive({
     saving: false,
     loading: false,
     confirm: null, // { reason: "feeds"|"osm-edits", feeds } awaiting the user
+    historyOpen: false, // the Session drawer
+    log: [], // activity log entries (see session.js)
+    redoStack: [], // entries undone and re-appliable
   },
   merge: {
     selected: [], // feed ids ticked for merging

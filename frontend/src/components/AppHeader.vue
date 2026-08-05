@@ -135,11 +135,19 @@ async function onSaveValidate() {
 
     <div class="spacer"></div>
 
-    <button class="history-btn" title="Session log">
+    <button
+      class="history-btn"
+      :class="{ open: store.session.historyOpen }"
+      title="Session log"
+      @click="store.session.historyOpen = !store.session.historyOpen"
+    >
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor">
         <circle cx="8" cy="8" r="6" stroke-width="1.4" />
         <path d="M8 4.5V8l2.4 1.6" stroke-width="1.4" stroke-linecap="round" />
       </svg>
+      <span v-if="store.session.log.length" class="history-badge">
+        {{ store.session.log.length }}
+      </span>
     </button>
 
     <span v-if="store.dirty" class="dirty-dot" title="Edited since last save"></span>
@@ -332,6 +340,7 @@ async function onSaveValidate() {
   flex: 1;
 }
 .history-btn {
+  position: relative;
   width: 30px;
   height: 30px;
   border: 1px solid var(--border-2);
@@ -342,6 +351,25 @@ async function onSaveValidate() {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+}
+.history-btn.open {
+  color: var(--accent);
+  background: var(--accent-tint);
+  border-color: var(--accent-border);
+}
+.history-badge {
+  position: absolute;
+  top: -4px;
+  right: -5px;
+  min-width: 15px;
+  height: 15px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font: 500 9px var(--mono);
+  display: grid;
+  place-items: center;
+  padding: 0 3px;
 }
 .history-btn:hover {
   color: var(--ink-2);

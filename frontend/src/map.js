@@ -6,6 +6,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 
 import { api } from "./api.js";
 import { BASEMAPS, basemapLayerId } from "./basemaps.js";
+import { logPlain, logRequestEdit, logServerEdit, NETWORK_FEED } from "./session.js";
 import { SNAP_FILTERS, store } from "./store.js";
 import { cropShapeFromRing } from "./catalogue.js";
 import { editTarget } from "./network.js";
@@ -448,6 +449,7 @@ async function handleMapClick(event) {
         stop_lat: lat,
         stop_lon: lng,
       });
+      logServerEdit("Stop moved", store.movingStop);
       store.movingStop = null;
       store.status = "";
       store.dirty = true;
@@ -464,6 +466,7 @@ async function handleMapClick(event) {
         stop_lat: lat,
         stop_lon: lng,
       });
+      logServerEdit("Stop added", stopId);
       store.dirty = true;
       await refreshAll(false);
       return;
@@ -1151,10 +1154,26 @@ async function handleNetworkClick(event) {
   }
   try {
     if (net.movingNode != null) {
-      await api("PATCH", `/api/network/nodes/${net.movingNode}`, {
+      const nodeId = net.movingNode;
+      // The pre-move position, for the compensating undo PATCH; the
+      // selection card still holds the node the move started from.
+      const previous =
+        net.selected && net.selected.id === nodeId
+          ? { lon: net.selected.lon, lat: net.selected.lat }
+          : null;
+      await api("PATCH", `/api/network/nodes/${nodeId}`, {
         lon: lng,
         lat,
       });
+      const path = `/api/network/nodes/${nodeId}`;
+      logRequestEdit(
+        "Node moved",
+        `node/${nodeId}`,
+        previous && Number.isFinite(previous.lon)
+          ? { method: "PATCH", path, body: previous }
+          : null,
+        { method: "PATCH", path, body: { lon: lng, lat } },
+      );
       net.movingNode = null;
       store.status = "";
       store.dirty = true;
@@ -1163,6 +1182,11 @@ async function handleNetworkClick(event) {
     }
     if (net.mode === "add-node") {
       await api("POST", "/api/network/nodes", { lon: lng, lat });
+      logPlain(
+        "Node added",
+        `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
+        NETWORK_FEED,
+      );
       store.dirty = true;
       await fetchNetwork();
     }

@@ -8,13 +8,15 @@ import { editTarget } from "./network.js";
 import {
   checkNetworkAvailable,
   loadCatalogue,
-  redoEdit,
+  refreshAfterHistory,
+  setCurrentFeed,
   toggleEditMode,
-  undoEdit,
 } from "./actions.js";
+import { configureSession, sessionRedo, sessionUndo } from "./session.js";
 import { undoShortcut } from "./undo.js";
 import AppHeader from "./components/AppHeader.vue";
 import NavRail from "./components/NavRail.vue";
+import SessionDrawer from "./components/SessionDrawer.vue";
 import Toasts from "./components/Toasts.vue";
 import AttributeTable from "./components/AttributeTable.vue";
 import BasemapControl from "./components/BasemapControl.vue";
@@ -67,10 +69,9 @@ watch(
   },
 );
 
-// Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (or +Y) act while editing feed data;
-// keystrokes inside form fields stay with the field.
+// Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (or +Y) act on the session log,
+// globally; keystrokes inside form fields stay with the field.
 window.addEventListener("keydown", (event) => {
-  if (!store.editMode || !feedPanel.value) return;
   const kind = undoShortcut({
     key: event.key,
     ctrlKey: event.ctrlKey,
@@ -80,11 +81,20 @@ window.addEventListener("keydown", (event) => {
   });
   if (!kind) return;
   event.preventDefault();
-  if (kind === "undo") undoEdit();
-  else redoEdit();
+  if (kind === "undo") sessionUndo();
+  else sessionRedo();
 });
 
 onMounted(async () => {
+  // The session core stays import-cycle-free by having its refresh and
+  // feed-switching injected here.
+  configureSession({
+    refresh: refreshAfterHistory,
+    makeCurrent: async (feedId) => {
+      const feed = store.catalogue.find((entry) => entry.feed_id === feedId);
+      if (feed && !feed.current) await setCurrentFeed(feed);
+    },
+  });
   createMap();
   await loadCatalogue();
   // Only on startup: later removing every feed must not move the user.
@@ -193,6 +203,7 @@ onMounted(async () => {
       <AttributeTable />
     </div>
   </div>
+  <SessionDrawer />
   <Toasts />
 </template>
 

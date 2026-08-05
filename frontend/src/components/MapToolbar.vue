@@ -2,14 +2,7 @@
 import { computed } from "vue";
 
 import { store } from "../store.js";
-import {
-  cancelShape,
-  finishShape,
-  redoEdit,
-  setMode,
-  undoEdit,
-} from "../actions.js";
-import { redoButtonTitle, undoButtonTitle } from "../undo.js";
+import { cancelShape, finishShape, setMode } from "../actions.js";
 import { cancelCropDraw, closeCropPolygon, startCropDraw } from "../map.js";
 
 const activeFeeds = computed(
@@ -58,22 +51,7 @@ const activeFeeds = computed(
       <button @click="cancelShape">Cancel</button>
     </template>
 
-    <button
-      class="mode"
-      :disabled="!store.undoLabel"
-      :title="undoButtonTitle(store.undoLabel)"
-      @click="undoEdit"
-    >
-      ↶ Undo
-    </button>
-    <button
-      class="mode"
-      :disabled="!store.redoLabel"
-      :title="redoButtonTitle(store.redoLabel)"
-      @click="redoEdit"
-    >
-      ↷ Redo
-    </button>
+    <!-- Undo/redo live in the session drawer and on ⌘Z / ⇧⌘Z. -->
 
     <!-- Cropping: draw an area, then confirm in the panel below the map. -->
     <template v-if="!store.cropDrawing && !store.cropShape">

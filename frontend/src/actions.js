@@ -17,7 +17,17 @@ import {
 import * as mapBridge from "./map.js";
 import { MODES, UNKNOWN_MODE } from "./modes.js";
 import { isDownloaded } from "./search.js";
+import {
+  NETWORK_FEED,
+  installRestoredLog,
+  logPlain,
+  logRequestEdit,
+  logServerEdit,
+  sessionLogForSave,
+  sessionUndo,
+} from "./session.js";
 import { forms, resetForms, store } from "./store.js";
+import { pushToast } from "./toasts.js";
 
 // A slow pre-restore availability check must not overwrite the state a
 // session restore has since installed.
@@ -74,6 +84,7 @@ export async function finishDrawWay(tags) {
     await mapBridge.fetchNetwork();
     store.status = "";
     store.dirty = true;
+    logPlain("Way drawn", `${vertices.length} vertices`, NETWORK_FEED);
   } catch (error) {
     store.status = error.message;
   }
@@ -93,14 +104,45 @@ export async function deleteNetworkWay() {
     await mapBridge.fetchNetwork();
     store.status = "";
     store.dirty = true;
+    // A deleted way cannot be recreated with its id: logged, not undoable.
+    logPlain("Way deleted", `way/${selected.id}`, NETWORK_FEED);
   } catch (error) {
     store.status = error.message;
   }
 }
 
+// The previous value of a network tag, for the compensating undo PATCH:
+// a promoted column, or a key inside the stringified `tags` dict.
+function previousTagValue(selected, key) {
+  if (selected[key] !== undefined) return selected[key];
+  const tags = selected.tags;
+  if (!tags) return undefined;
+  try {
+    const dict = typeof tags === "string" ? JSON.parse(tags) : tags;
+    return dict ? dict[key] : undefined;
+  } catch (error) {
+    return undefined;
+  }
+}
+
+function logRetag(osmType, id, key, value, previous) {
+  const path = `/api/network/${osmType === "way" ? "ways" : "nodes"}/${id}`;
+  logRequestEdit(
+    key === "highway" && osmType === "way"
+      ? "Way reclassified"
+      : `${osmType === "way" ? "Way" : "Node"} retagged`,
+    `${osmType}/${id} ${key}=${value}`,
+    previous == null
+      ? null // no old value known: logged, not undoable
+      : { method: "PATCH", path, body: { tags: { [key]: previous } } },
+    { method: "PATCH", path, body: { tags: { [key]: value } } },
+  );
+}
+
 export async function retagNetworkWay(key, value) {
   const selected = store.network.selected;
   if (!selected || !key.trim()) return;
+  const previous = previousTagValue(selected, key.trim());
   try {
     await api("PATCH", `/api/network/ways/${selected.id}`, {
       tags: { [key.trim()]: value },
@@ -109,6 +151,7 @@ export async function retagNetworkWay(key, value) {
     await mapBridge.fetchNetwork();
     store.status = "";
     store.dirty = true;
+    logRetag("way", selected.id, key.trim(), value, previous);
   } catch (error) {
     store.status = error.message;
   }
@@ -132,6 +175,7 @@ export async function deleteNetworkNode() {
     await mapBridge.fetchNetwork();
     store.status = "";
     store.dirty = true;
+    logPlain("Node deleted", `node/${selected.id}`, NETWORK_FEED);
   } catch (error) {
     store.status = error.message;
   }
@@ -140,6 +184,7 @@ export async function deleteNetworkNode() {
 export async function retagNetworkNode(key, value) {
   const selected = store.network.selected;
   if (!selected || !key.trim()) return;
+  const previous = previousTagValue(selected, key.trim());
   try {
     await api("PATCH", `/api/network/nodes/${selected.id}`, {
       tags: { [key.trim()]: value },
@@ -149,6 +194,7 @@ export async function retagNetworkNode(key, value) {
     await mapBridge.fetchNetwork();
     store.status = "";
     store.dirty = true;
+    logRetag("node", selected.id, key.trim(), value, previous);
   } catch (error) {
     store.status = error.message;
   }
@@ -438,6 +484,7 @@ export const finishShape = wrap(async () => {
     shape_id: shapeId,
     points: coords.map(([lon, lat]) => [lat, lon]),
   });
+  logServerEdit("Shape drawn", shapeId);
   cancelShape();
   await mapBridge.refreshAll(false);
 });
@@ -450,6 +497,7 @@ export const updateInspectedStop = wrap(async () => {
       stop_name: store.inspector.name,
     },
   );
+  logServerEdit("Stop renamed", store.inspector.stopId);
   await mapBridge.refreshAll(false);
 });
 
@@ -470,6 +518,7 @@ export const submitRoute = wrap(async () => {
     ...forms.route,
     agency_id: forms.route.agency_id || null,
   });
+  logServerEdit("Route added", forms.route.route_id);
   forms.route.route_id = "";
   forms.route.route_short_name = "";
   await mapBridge.refreshAll(false);
@@ -481,6 +530,10 @@ export const submitTrip = wrap(async () => {
     shape_id: forms.trip.shape_id || null,
     stops: store.tripStops.map((entry) => [entry.stopId, entry.offset]),
   });
+  logServerEdit(
+    "Trips generated",
+    `${forms.trip.route_id} every ${forms.trip.headway}s`,
+  );
   store.tripStops.length = 0;
   forms.trip.trip_id = "";
   await mapBridge.refreshAll(false);
@@ -488,11 +541,13 @@ export const submitTrip = wrap(async () => {
 
 export const submitAgency = wrap(async () => {
   await api("POST", "/api/agencies", { ...forms.agency });
+  logServerEdit("Agency added", forms.agency.agency_id);
   await mapBridge.refreshAll(false);
 });
 
 export const submitService = wrap(async () => {
   await api("POST", "/api/services", { ...forms.service });
+  logServerEdit("Service added", forms.service.service_id);
   await mapBridge.refreshAll(false);
 });
 
@@ -552,12 +607,20 @@ export const applyTripTimes = wrap(async () => {
       times: updates,
     },
   );
+  logServerEdit("Stop times applied", store.trip.trip_id);
   await loadTrip(store.trip.trip_id);
   await mapBridge.refreshSummary(); // the undo label just changed
 });
 
 export const deleteTrip = wrap(async () => {
-  await api("DELETE", `/api/trips/${encodeURIComponent(store.trip.trip_id)}`);
+  const tripId = store.trip.trip_id;
+  await api("DELETE", `/api/trips/${encodeURIComponent(tripId)}`);
+  logServerEdit("Trip deleted", tripId);
+  pushToast({
+    title: "trip deleted",
+    body: tripId,
+    action: { label: "undo", run: sessionUndo },
+  });
   store.trip = null;
   await loadTrips();
   await mapBridge.refreshAll(false);
@@ -570,6 +633,10 @@ export const shiftTrip = wrap(async () => {
     {
       seconds: store.shiftSeconds,
     },
+  );
+  logServerEdit(
+    "Trip shifted",
+    `${store.trip.trip_id} by ${store.shiftSeconds}s`,
   );
   await loadTrip(store.trip.trip_id);
   await mapBridge.refreshSummary(); // the undo label just changed
@@ -799,7 +866,11 @@ export async function saveSession() {
     const target = hasExtension ? path : `${path.replace(/\.$/, "")}.json`;
     const body = await api("POST", "/api/session/save", {
       path: target,
-      view: sessionView(store, mapBridge.getCamera()),
+      view: {
+        ...sessionView(store, mapBridge.getCamera()),
+        ...(store.session.wsName ? { ws_name: store.session.wsName } : {}),
+        log: sessionLogForSave(),
+      },
     });
     session.path = body.path;
     store.status = saveSessionStatus(body);
@@ -827,6 +898,14 @@ function applySessionView(view) {
     // the restored panel is now the working panel (or none, for Data)
     store.workingPanel = plan.activePanel === "data" ? null : plan.activePanel;
   }
+  // Workspace extras ride in the same view blob: the name and the
+  // activity log (viewable after a reload, not undoable — the server
+  // holds no history for pre-save actions).
+  if (typeof view.ws_name === "string" && view.ws_name) {
+    store.session.wsName = view.ws_name;
+    store.session.named = true;
+  }
+  installRestoredLog(view.log);
   if (plan.camera) mapBridge.jumpTo(plan.camera.center, plan.camera.zoom);
   else if (plan.fit) mapBridge.fitToStops();
 }
@@ -905,13 +984,11 @@ export function cancelLoadSession() {
   store.session.confirm = null;
 }
 
-// Undo/redo against the current feed; the server peeks the labels.
-let undoBusy = false;
-
-// Every feed-scoped view must reflect the reverted tables: stale
-// editable values (an open timetable, the attribute table) could
+// Every feed-scoped view must reflect reverted tables after an undo/redo:
+// stale editable values (an open timetable, the attribute table) could
 // otherwise be saved back, silently re-applying what was just undone.
-async function refreshAfterHistory() {
+// The session core calls this via its injected refresh hook.
+export async function refreshAfterHistory() {
   await mapBridge.refreshAll(false);
   if (store.tableView.open) await loadTable();
   if (store.timetableRoute) await loadTrips();
@@ -928,43 +1005,6 @@ async function refreshAfterHistory() {
     }
   }
   closeInspector(); // its stop may no longer exist or match
-}
-
-async function runHistory(path, verb) {
-  if (undoBusy) return;
-  undoBusy = true;
-  try {
-    let body;
-    try {
-      // the feed id pins the request to the feed the label came from
-      body = await api("POST", path, { feed_id: store.currentFeedId });
-    } catch (error) {
-      store.status = error.message;
-      return;
-    }
-    // committed: report it as done even if the refresh below hiccups —
-    // a refresh error must not read as "the undo failed, try again"
-    const label = body.undone ?? body.redone;
-    store.status = `${verb} ${label}`;
-    store.dirty = true;
-    try {
-      await refreshAfterHistory();
-    } catch (error) {
-      store.status = `${verb} ${label} — refresh failed: ${error.message}`;
-    }
-  } finally {
-    undoBusy = false;
-  }
-}
-
-export async function undoEdit() {
-  if (!store.undoLabel) return;
-  await runHistory("/api/undo", "undid");
-}
-
-export async function redoEdit() {
-  if (!store.redoLabel) return;
-  await runHistory("/api/redo", "redid");
 }
 
 export function toggleMergeSelected(feed) {

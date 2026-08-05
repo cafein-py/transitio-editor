@@ -3,6 +3,7 @@
 // actions until the landing page takes it over.
 import { api } from "../api.js";
 import { getCamera } from "../map.js";
+import { sessionLogForSave } from "../session.js";
 import { sessionView } from "../sessions.js";
 import { store } from "../store.js";
 import { pushToast } from "../toasts.js";
@@ -37,6 +38,7 @@ export async function saveWorkspaceAs(name, dir) {
     const view = {
       ...sessionView(store, getCamera()),
       ws_name: name.trim(),
+      log: sessionLogForSave(),
     };
     const body = await api("POST", "/api/session/save", {
       path: `${dir.replace(/[/\\]$/, "")}/${file}`,
