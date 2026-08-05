@@ -8,14 +8,14 @@ import {
 } from "../src/sessions.js";
 
 describe("sessionView", () => {
-  it("captures the map-only state, with the working tab", () => {
+  it("captures the map-only state, with the working panel", () => {
     const state = {
       basemap: "dark",
       hiddenModes: [-1, 4],
       shapeColorBy: "feed",
       stopsVisible: false,
-      workingTab: "report",
-      activeTab: "catalogue", // where the save button lives — not recorded
+      workingPanel: "validate",
+      activePanel: "data", // the neutral home — not recorded
     };
     const camera = { center: [24.9, 60.2], zoom: 9 };
     expect(sessionView(state, camera)).toEqual({
@@ -24,12 +24,12 @@ describe("sessionView", () => {
       hidden_modes: [-1, 4],
       shape_color_by: "feed",
       stops_visible: false,
-      active_tab: "report",
+      active_tab: "validate",
     });
   });
 
-  it("falls back to the Data tab when nothing else was visited", () => {
-    expect(sessionView({ hiddenModes: [] }, null).active_tab).toBe("catalogue");
+  it("falls back to the Data panel when nothing else was visited", () => {
+    expect(sessionView({ hiddenModes: [] }, null).active_tab).toBe("data");
   });
 });
 
@@ -40,7 +40,7 @@ describe("sessionRestorePlan", () => {
       hidden_modes: [0, 3, "bad"],
       shape_color_by: "feed",
       stops_visible: false,
-      active_tab: "report",
+      active_tab: "validate",
       camera: { center: [24.9, 60.2], zoom: 9 },
     });
     expect(plan).toEqual({
@@ -48,9 +48,22 @@ describe("sessionRestorePlan", () => {
       hiddenModes: [0, 3], // non-numbers dropped
       shapeColorBy: "feed",
       stopsVisible: false,
-      activeTab: "report",
+      activePanel: "validate",
       camera: { center: [24.9, 60.2], zoom: 9 },
     });
+  });
+
+  it("maps pre-redesign tab names to their panels", () => {
+    expect(sessionRestorePlan({ active_tab: "view" }).activePanel).toBe("data");
+    expect(sessionRestorePlan({ active_tab: "network" }).activePanel).toBe(
+      "streets",
+    );
+    expect(sessionRestorePlan({ active_tab: "report" }).activePanel).toBe(
+      "validate",
+    );
+    expect(sessionRestorePlan({ active_tab: "catalogue" }).activePanel).toBe(
+      "data",
+    );
   });
 
   it("fits to the feeds when the camera is missing or malformed", () => {
@@ -75,7 +88,7 @@ describe("sessionRestorePlan", () => {
       future_field: 42,
     });
     expect(plan.shapeColorBy).toBeUndefined();
-    expect(plan.activeTab).toBeUndefined();
+    expect(plan.activePanel).toBeUndefined();
     expect(plan).not.toHaveProperty("future_field");
   });
 });

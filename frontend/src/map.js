@@ -440,7 +440,7 @@ export function highlightContext(context) {
 async function handleMapClick(event) {
   // Map clicks mutate the feed (move/add stop, draw); inert while the OSM
   // network is the edit target.
-  if (editTarget(store.activeTab) !== "feed") return;
+  if (editTarget(store.activePanel) !== "feed") return;
   const { lng, lat } = event.lngLat;
   try {
     if (store.movingStop) {
@@ -450,6 +450,7 @@ async function handleMapClick(event) {
       });
       store.movingStop = null;
       store.status = "";
+      store.dirty = true;
       await refreshAll(false);
       return;
     }
@@ -463,6 +464,7 @@ async function handleMapClick(event) {
         stop_lat: lat,
         stop_lon: lng,
       });
+      store.dirty = true;
       await refreshAll(false);
       return;
     }
@@ -791,7 +793,7 @@ export function createMap() {
       // While editing the OSM network, stops are context: ignore them
       // silently (no preventDefault) so a network feature under the same
       // click stays inspectable.
-      if (editTarget(store.activeTab) !== "feed") return;
+      if (editTarget(store.activePanel) !== "feed") return;
       // Co-located stops from several active feeds can share one click;
       // prefer the current feed's stop so it stays editable under an
       // overlay. Edits target the current feed; others are context only.
@@ -836,14 +838,14 @@ export function createMap() {
       // In add-node/move-node/draw-way mode a click on a road/node is a
       // placement, not a selection: fall through to the general handler.
       if (
-        editTarget(store.activeTab) === "network" &&
+        editTarget(store.activePanel) === "network" &&
         (store.network.mode === "add-node" ||
           store.network.mode === "draw-way" ||
           store.network.movingNode != null)
       ) {
         return;
       }
-      if (editTarget(store.activeTab) !== "network") {
+      if (editTarget(store.activePanel) !== "network") {
         // On the feed tab the network is context. Hint only when the click
         // hit no feed feature — a stop or shape under the same click must
         // stay selectable, so never preventDefault here.
@@ -851,7 +853,7 @@ export function createMap() {
           layers: ["stops", "shapes"],
         }).length;
         if (!feedHit && store.mode === "select" && !store.movingStop) {
-          store.status = "switch to the OSM tab to inspect the network";
+          store.status = "switch to the Streets panel to inspect the network";
         }
         return;
       }
@@ -933,7 +935,7 @@ export function createMap() {
       ["shapes", "shape"],
     ]) {
       map.on("mousemove", layer, (event) => {
-        if (store.activeTab !== "view" || store.editMode) return;
+        if (editTarget(store.activePanel) !== "feed" || store.editMode) return;
         hoverPopup
           .setLngLat(event.lngLat)
           .setDOMContent(featureCard(event.features[0], kind))
@@ -942,7 +944,9 @@ export function createMap() {
       });
       map.on("mouseleave", layer, () => {
         hoverPopup.remove();
-        if (store.activeTab === "view" && !store.editMode) setCursor("");
+        if (editTarget(store.activePanel) === "feed" && !store.editMode) {
+          setCursor("");
+        }
       });
     }
 
@@ -951,7 +955,7 @@ export function createMap() {
     pinnedPopup.on("close", () => setSelectedShape(null));
     map.on("click", "shapes", (event) => {
       if (event.defaultPrevented || store.aoiDrawing || croppingClick()) return;
-      if (store.activeTab !== "view") return;
+      if (editTarget(store.activePanel) !== "feed") return;
       if (store.mode !== "select" || store.movingStop) return;
       hoverPopup.remove();
       setSelectedShape(event.features[0].properties);
@@ -972,9 +976,9 @@ export function createMap() {
         return;
       }
       if (event.defaultPrevented || store.aoiDrawing || croppingClick()) return;
-      if (editTarget(store.activeTab) === "network") {
+      if (editTarget(store.activePanel) === "network") {
         handleNetworkClick(event);
-      } else if (store.activeTab === "view" && store.editMode) {
+      } else if (store.editMode) {
         // Feed mutations only with the editing switch on: an armed mode
         // (add stop, draw) must not fire while just viewing.
         handleMapClick(event);
@@ -1153,11 +1157,13 @@ async function handleNetworkClick(event) {
       });
       net.movingNode = null;
       store.status = "";
+      store.dirty = true;
       await fetchNetwork();
       return;
     }
     if (net.mode === "add-node") {
       await api("POST", "/api/network/nodes", { lon: lng, lat });
+      store.dirty = true;
       await fetchNetwork();
     }
   } catch (error) {

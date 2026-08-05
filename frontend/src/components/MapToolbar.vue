@@ -18,8 +18,12 @@ const activeFeeds = computed(
 </script>
 
 <template>
-  <!-- Floating creation tools over the map, present only in editing mode. -->
-  <div v-if="store.editMode && store.activeTab === 'view'" class="map-toolbar">
+  <!-- Floating creation tools over the map, present only in editing mode
+       (the Streets panel edits the network with its own tools). -->
+  <div
+    v-if="store.editMode && store.activePanel !== 'streets'"
+    class="map-toolbar"
+  >
     <button
       class="mode"
       :class="{ active: store.mode === 'select' }"

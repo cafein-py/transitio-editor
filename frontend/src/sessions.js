@@ -3,9 +3,9 @@
 // so the field-by-field logic lives here where it is testable.
 
 // The view state a session records — everything the map cannot rebuild
-// from the data alone. `workingTab` is the tab the user was actually in
-// (the save button lives on the Data tab, which would otherwise always
-// be the recorded tab).
+// from the data alone. `workingPanel` is the panel the user was actually
+// in (the Data panel is the neutral home and would otherwise always be
+// the recorded one).
 export function sessionView(state, camera) {
   return {
     camera, // { center: [lng, lat], zoom }
@@ -13,7 +13,7 @@ export function sessionView(state, camera) {
     hidden_modes: [...state.hiddenModes],
     shape_color_by: state.shapeColorBy,
     stops_visible: state.stopsVisible,
-    active_tab: state.workingTab || "catalogue",
+    active_tab: state.workingPanel || "data",
   };
 }
 
@@ -35,8 +35,27 @@ export function sessionRestorePlan(view) {
   if (typeof view.stops_visible === "boolean") {
     plan.stopsVisible = view.stops_visible;
   }
-  const TABS = ["search", "catalogue", "view", "network", "report"];
-  if (TABS.includes(view.active_tab)) plan.activeTab = view.active_tab;
+  const PANELS = [
+    "search",
+    "data",
+    "stops",
+    "routes",
+    "cal",
+    "trips",
+    "agencies",
+    "streets",
+    "validate",
+  ];
+  // Sessions from before the redesign recorded tab names; map them to the
+  // panel that took the tab's place.
+  const LEGACY_TABS = {
+    catalogue: "data",
+    view: "data",
+    network: "streets",
+    report: "validate",
+  };
+  const panel = LEGACY_TABS[view.active_tab] || view.active_tab;
+  if (PANELS.includes(panel)) plan.activePanel = panel;
   const camera = view.camera;
   if (
     camera &&

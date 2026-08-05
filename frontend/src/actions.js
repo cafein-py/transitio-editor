@@ -73,6 +73,7 @@ export async function finishDrawWay(tags) {
     setNetworkMode("select"); // clears the draw and its preview
     await mapBridge.fetchNetwork();
     store.status = "";
+    store.dirty = true;
   } catch (error) {
     store.status = error.message;
   }
@@ -91,6 +92,7 @@ export async function deleteNetworkWay() {
     mapBridge.setSelectedNetworkFeature(null);
     await mapBridge.fetchNetwork();
     store.status = "";
+    store.dirty = true;
   } catch (error) {
     store.status = error.message;
   }
@@ -106,6 +108,7 @@ export async function retagNetworkWay(key, value) {
     store.network.selected = { ...selected, [key.trim()]: value };
     await mapBridge.fetchNetwork();
     store.status = "";
+    store.dirty = true;
   } catch (error) {
     store.status = error.message;
   }
@@ -128,6 +131,7 @@ export async function deleteNetworkNode() {
     mapBridge.setSelectedNetworkFeature(null);
     await mapBridge.fetchNetwork();
     store.status = "";
+    store.dirty = true;
   } catch (error) {
     store.status = error.message;
   }
@@ -144,6 +148,7 @@ export async function retagNetworkNode(key, value) {
     store.network.selected = { ...selected, [key.trim()]: value };
     await mapBridge.fetchNetwork();
     store.status = "";
+    store.dirty = true;
   } catch (error) {
     store.status = error.message;
   }
@@ -333,6 +338,7 @@ export function wrap(action) {
     try {
       await action(...args);
       store.status = "";
+      store.dirty = true;
       if (store.report) store.reportStale = true;
     } catch (error) {
       store.status = error.message;
@@ -816,10 +822,10 @@ function applySessionView(view) {
     store.stopsVisible = plan.stopsVisible;
     mapBridge.setStopsVisible(plan.stopsVisible);
   }
-  if (plan.activeTab) {
-    store.activeTab = plan.activeTab;
-    // the restored tab is now the working tab (or none, for Data)
-    store.workingTab = plan.activeTab === "catalogue" ? null : plan.activeTab;
+  if (plan.activePanel) {
+    store.activePanel = plan.activePanel;
+    // the restored panel is now the working panel (or none, for Data)
+    store.workingPanel = plan.activePanel === "data" ? null : plan.activePanel;
   }
   if (plan.camera) mapBridge.jumpTo(plan.camera.center, plan.camera.zoom);
   else if (plan.fit) mapBridge.fitToStops();
@@ -940,6 +946,7 @@ async function runHistory(path, verb) {
     // a refresh error must not read as "the undo failed, try again"
     const label = body.undone ?? body.redone;
     store.status = `${verb} ${label}`;
+    store.dirty = true;
     try {
       await refreshAfterHistory();
     } catch (error) {

@@ -1,0 +1,217 @@
+/* Shell layout and shared primitives. Panel-specific styling lives scoped
+   inside each component; this file only holds what every screen shares. */
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#app {
+  height: 100%;
+}
+body {
+  margin: 0;
+  font: 12.5px/1.45 var(--sans);
+  color: var(--ink);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+/* Three regions, full viewport, no page scroll. */
+#app {
+  display: flex;
+  flex-direction: column;
+}
+.shell-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+.shell-aside {
+  width: 318px;
+  flex: none;
+  background: var(--panel);
+  border-right: 1px solid var(--border-2);
+  overflow-y: auto;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+.shell-aside.narrow {
+  width: 272px;
+}
+.shell-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.map-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+#map {
+  position: absolute;
+  inset: 0;
+}
+
+/* Floating map overlays: containers never block the map; each card
+   re-enables pointer events for itself. */
+.map-overlay {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.map-overlay > * {
+  pointer-events: auto;
+}
+.map-overlay.top-left {
+  top: 10px;
+  left: 10px;
+  align-items: flex-start;
+}
+.map-overlay.bottom-right {
+  bottom: 22px;
+  right: 10px;
+  align-items: flex-end;
+}
+
+/* Shared primitives. */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  border-radius: 9px;
+  padding: 10px 11px;
+}
+.mono-label {
+  font: 500 9.5px var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-5);
+}
+.mono {
+  font-family: var(--mono);
+}
+.btn {
+  font: 500 12px var(--sans);
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--border-3);
+  border-radius: var(--r-input);
+  height: 30px;
+  padding: 0 11px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn:hover {
+  background: var(--panel);
+}
+.btn:disabled {
+  color: var(--ink-disabled);
+  cursor: default;
+  background: var(--surface);
+}
+.btn.dark {
+  font-size: 12.5px;
+  background: var(--ink);
+  color: #fff;
+  border-color: var(--ink);
+}
+.btn.dark:hover {
+  background: #26282d;
+}
+.btn.small {
+  height: 24px;
+  font-size: 11.5px;
+  padding: 0 8px;
+  border-radius: var(--r-btn-sm);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  border: 1px solid var(--border-3);
+  border-radius: var(--r-pill);
+  padding: 3px 9px;
+  background: var(--surface);
+  cursor: pointer;
+}
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--r-swatch);
+  flex: none;
+}
+.kbd {
+  font: 500 9.5px var(--mono);
+  letter-spacing: 0.04em;
+  color: var(--ink-5);
+  border: 1px solid var(--border-3);
+  border-radius: 4px;
+  padding: 1px 4px;
+  background: var(--surface);
+}
+
+/* Modal dialogs (save-workspace naming, confirms). */
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 22, 26, 0.28);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 18vh;
+  z-index: 40;
+}
+.dialog {
+  background: var(--surface);
+  border: 1px solid var(--border-3);
+  border-radius: var(--r-card);
+  box-shadow: 0 8px 32px rgba(20, 22, 26, 0.18);
+  width: 380px;
+  max-width: calc(100vw - 40px);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.dialog h2 {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.dialog .field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dialog input {
+  font: 12.5px var(--sans);
+  border: 1px solid var(--border-3);
+  border-radius: var(--r-input);
+  padding: 6px 9px;
+  color: var(--ink);
+}
+.dialog input.accent {
+  border-color: var(--accent-border);
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+.dialog input:focus {
+  outline: none;
+  border-color: var(--accent-border);
+}
+.dialog .dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 3px;
+}

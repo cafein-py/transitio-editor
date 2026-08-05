@@ -25,12 +25,12 @@ import {
   toggleNetworkVisible,
 } from "../actions.js";
 
-// The network loads eagerly at startup; retry on tab open in case that
+// The network loads eagerly at startup; retry on panel open in case that
 // failed (loadNetwork no-ops once loaded).
 watch(
-  () => store.activeTab,
-  (tab) => {
-    if (tab === "network") loadNetwork();
+  () => store.activePanel,
+  (panel) => {
+    if (panel === "streets") loadNetwork();
   },
 );
 

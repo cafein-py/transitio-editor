@@ -29,10 +29,10 @@ function hasFeedContent(feed) {
   return Boolean(feed.source) || Object.keys(feed.tables || {}).length > 0;
 }
 
-// The tab to open on startup: with a feed loaded the editor starts on the
+// The panel to open on startup: with a feed loaded the editor starts on the
 // data; with nothing to show it starts where feeds are found.
-export function initialTab(catalogue) {
-  return (catalogue || []).some(hasFeedContent) ? "view" : "search";
+export function initialPanel(catalogue) {
+  return (catalogue || []).some(hasFeedContent) ? "data" : "search";
 }
 
 // The catalogue as display sections: one per known group in order,

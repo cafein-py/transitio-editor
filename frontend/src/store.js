@@ -11,9 +11,13 @@ export const SNAP_FILTERS = {
 };
 
 export const store = reactive({
-  activeTab: "view",
+  // Active left-panel key: data | stops | routes | cal | trips | agencies |
+  // streets | validate (+ search until the ⌘K palette replaces it).
+  activePanel: "data",
+  layout: "sidebar", // header layout switcher: "sidebar" | "inspector" | "table"
+  dirty: false, // edits since the workspace was last saved (header dot)
   basemap: DEFAULT_BASEMAP, // background tile style, switchable on the map
-  editMode: false, // the View/Edit tab's switch: map features editable
+  editMode: false, // map features of the current feed editable
   tableView: {
     open: false, // attribute table shown below the map
     file: "", // GTFS file being browsed
@@ -41,10 +45,14 @@ export const store = reactive({
     fullTripsOnly: false, // keep only trips entirely inside the area
     running: false,
   },
-  // The tab the user last worked in, excluding the Data tab the session
-  // buttons live on — what a saved session reopens.
-  workingTab: null,
+  // The panel the user last worked in, excluding the Data panel — what a
+  // saved workspace reopens.
+  workingPanel: null,
   session: {
+    wsName: "", // workspace name, set by the save dialog
+    named: false, // once named, Save workspace saves without asking
+    savedAt: null, // epoch ms of the last successful save
+    dir: "", // folder the workspace .json is saved into
     path: "", // the session .json to save to / load from
     saving: false,
     loading: false,
