@@ -327,7 +327,11 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
     </div>
 
     <!-- The one OSM extract, so all loaded data is visible in one place. -->
-    <div v-if="store.network.available" class="osm-row">
+    <div
+      v-if="store.network.available"
+      class="osm-row"
+      :class="{ inactive: !store.network.visible }"
+    >
       <button
         class="eye"
         :class="{ off: !store.network.visible }"
@@ -735,18 +739,17 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
   display: flex;
   align-items: flex-start;
   gap: 6px;
-  border: 1px solid rgba(122, 79, 191, 0.32);
+  border: 1px solid rgba(122, 79, 191, 0.3);
+  /* the purple spine + soft tint say "not a feed" without the noise a
+     pattern brings */
+  border-left: 3px solid rgba(122, 79, 191, 0.55);
   border-radius: var(--r-card);
   padding: 8px 9px;
-  /* faint diagonal weave over a purple tint: reads as "not a feed" at a
-     glance, even before the icon and badge */
-  background:
-    repeating-linear-gradient(
-      45deg,
-      rgba(122, 79, 191, 0.045) 0 5px,
-      transparent 5px 11px
-    ),
-    rgba(122, 79, 191, 0.05);
+  background: rgba(122, 79, 191, 0.055);
+}
+.osm-row.inactive .osm-main,
+.osm-row.inactive .osm-icon {
+  opacity: 0.55;
 }
 .osm-icon {
   width: 20px;
