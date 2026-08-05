@@ -80,11 +80,11 @@ body {
   align-items: flex-end;
   max-height: calc(100% - 60px);
 }
-.map-overlay.bottom-right {
-  /* beside MapLibre's bottom-right control column, never over it */
+.map-overlay.bottom-left {
+  /* MapLibre owns the bottom-right (zoom + attribution); this corner is free */
   bottom: 22px;
-  right: 54px;
-  align-items: flex-end;
+  left: 10px;
+  align-items: flex-start;
 }
 
 /* Shared primitives. */

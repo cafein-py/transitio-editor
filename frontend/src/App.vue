@@ -203,7 +203,7 @@ onMounted(async () => {
         <div class="map-overlay top-right">
           <StopInspector v-if="feedPanel" />
         </div>
-        <div class="map-overlay bottom-right">
+        <div class="map-overlay bottom-left">
           <BasemapControl />
         </div>
       </div>
