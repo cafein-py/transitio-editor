@@ -277,13 +277,25 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
       >
         <Icon :name="store.network.visible ? 'eye' : 'eye-off'" />
       </button>
-      <span class="osm-dot"></span>
+      <span
+        class="osm-dot"
+        :class="{ bad: store.network.error }"
+        :title="store.network.error || null"
+      ></span>
       <span class="mono osm-name" :title="store.network.source">
         {{ osmName }}
       </span>
       <span v-if="store.network.loaded" class="mono osm-meta">
         {{ store.network.wayCount }} ways
       </span>
+      <button
+        v-else-if="store.network.error"
+        class="btn small"
+        title="The network did not load — details on the Streets panel"
+        @click="store.activePanel = 'streets'"
+      >
+        Not loaded
+      </button>
     </div>
 
     <button class="new-group" @click="newGroup">+ New group</button>
@@ -649,6 +661,9 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
   border-radius: 50%;
   background: var(--ok);
   flex: none;
+}
+.osm-dot.bad {
+  background: var(--error);
 }
 .osm-name {
   flex: 1;

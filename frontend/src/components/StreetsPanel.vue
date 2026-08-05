@@ -92,6 +92,20 @@ function selectRow(row) {
   selectWay(row.properties);
 }
 
+// Map selection → the row: jump to its page and scroll it into view
+// (only while this panel is the one in use), like the Stops list.
+watch(
+  () => [
+    store.network.selected && store.network.selected.id,
+    store.activePanel,
+  ],
+  () => {
+    if (store.activePanel !== "streets" || !store.network.selected) return;
+    const id = store.network.selected.id;
+    list.reveal((row) => row.id === id);
+  },
+);
+
 function zoomToRow(row) {
   selectRow(row);
   const way = waysData().find((f) => f.properties.id === row.id);
@@ -123,11 +137,20 @@ const acquireOpen = ref(false);
     </div>
 
     <div class="extract-row">
-      <span class="dot" :class="{ off: !store.network.available }"></span>
+      <span
+        class="dot"
+        :class="{ off: !store.network.available, bad: store.network.error }"
+      ></span>
       <span class="mono extract-name" :title="store.network.source">
         {{ extractName }}
       </span>
       <button class="btn small" @click="acquireOpen = !acquireOpen">Swap</button>
+    </div>
+
+    <p v-if="store.network.loading" class="mono note">loading network…</p>
+    <div v-if="store.network.error" class="error load-error">
+      {{ store.network.error }}
+      <button class="btn small" @click="loadNetwork">Retry</button>
     </div>
 
     <!-- Transitional acquire block until the unified search absorbs it. -->
@@ -313,6 +336,17 @@ const acquireOpen = ref(false);
 }
 .dot.off {
   background: var(--ink-disabled);
+}
+.dot.bad {
+  background: var(--error);
+}
+.load-error {
+  font-size: 11px;
+  line-height: 1.45;
+  background: rgba(184, 58, 58, 0.08);
+  border: 1px solid rgba(184, 58, 58, 0.25);
+  border-radius: var(--r-chip);
+  padding: 7px 9px;
 }
 .extract-name {
   flex: 1;
