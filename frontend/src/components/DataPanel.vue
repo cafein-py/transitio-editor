@@ -19,8 +19,8 @@ import {
   openBrowser,
   saveSession,
   setShapeColorBy,
-  toggleNetworkVisible,
 } from "../actions.js";
+import { toggleNetworkVisible } from "../actions/streets.js";
 import { groupedCatalogue } from "../catalogue.js";
 import { store } from "../store.js";
 import FeedCard from "./FeedCard.vue";

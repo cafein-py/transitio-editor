@@ -3,6 +3,7 @@
 // the status line and marks the validation report stale.
 import { api } from "./api.js";
 import { loadCatalogue } from "./actions/catalogue.js";
+import { checkNetworkAvailable, invalidateResolve } from "./actions/streets.js";
 import {
   restoreSessionStatus,
   saveSessionStatus,
@@ -13,10 +14,7 @@ import * as mapBridge from "./map.js";
 import { MODES, UNKNOWN_MODE } from "./modes.js";
 import { isDownloaded } from "./search.js";
 import {
-  NETWORK_FEED,
   installRestoredLog,
-  logPlain,
-  logRequestEdit,
   logServerEdit,
   sessionLogForSave,
   sessionUndo,
@@ -24,324 +22,7 @@ import {
 import { forms, resetForms, store } from "./store.js";
 import { pushToast } from "./toasts.js";
 
-// A slow pre-restore availability check must not overwrite the state a
-// session restore has since installed.
-let networkAvailableSeq = 0;
-
-export async function checkNetworkAvailable() {
-  const seq = ++networkAvailableSeq;
-  try {
-    const body = await api("GET", "/api/network");
-    if (seq !== networkAvailableSeq) return;
-    store.network.available = Boolean(body.available);
-    store.network.source = body.source || null;
-    // Both domains are visible by default: load the network eagerly so it
-    // shows alongside the feed from the start, not only after opening the tab.
-    if (store.network.available) await loadNetwork();
-  } catch (error) {
-    if (seq !== networkAvailableSeq) return;
-    store.network.available = false;
-  }
-}
-
-export async function loadNetwork() {
-  const net = store.network;
-  if (net.loaded || net.loading || !net.available) return;
-  net.loading = true;
-  net.error = "";
-  try {
-    await mapBridge.mapReady; // sources exist before we set their data
-    if ((await mapBridge.fetchNetwork()) === false) return; // superseded
-    net.loaded = true;
-    mapBridge.setNetworkVisible(net.visible);
-  } catch (error) {
-    net.error = error.message;
-  } finally {
-    net.loading = false;
-  }
-}
-
-export function setNetworkMode(mode) {
-  store.network.mode = mode;
-  store.network.movingNode = null;
-  mapBridge.clearNetworkDraw();
-  mapBridge.setCursor(
-    mode === "add-node" || mode === "draw-way" ? "crosshair" : "",
-  );
-}
-
-export async function finishDrawWay(tags) {
-  if (store.network.draw.length < 2) return;
-  const vertices = store.network.draw.map((point) => point.vertex);
-  try {
-    await api("POST", "/api/network/ways", { vertices, tags });
-    setNetworkMode("select"); // clears the draw and its preview
-    await mapBridge.fetchNetwork();
-    store.status = "";
-    store.dirty = true;
-    logPlain("Way drawn", `${vertices.length} vertices`, NETWORK_FEED);
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-export function cancelDrawWay() {
-  setNetworkMode("select");
-}
-
-export async function deleteNetworkWay() {
-  const selected = store.network.selected;
-  if (!selected) return;
-  try {
-    await api("DELETE", `/api/network/ways/${selected.id}`);
-    store.network.selected = null;
-    mapBridge.setSelectedNetworkFeature(null);
-    await mapBridge.fetchNetwork();
-    store.status = "";
-    store.dirty = true;
-    // A deleted way cannot be recreated with its id: logged, not undoable.
-    logPlain("Way deleted", `way/${selected.id}`, NETWORK_FEED);
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-// The previous value of a network tag, for the compensating undo PATCH:
-// a promoted column, or a key inside the stringified `tags` dict.
-function previousTagValue(selected, key) {
-  if (selected[key] !== undefined) return selected[key];
-  const tags = selected.tags;
-  if (!tags) return undefined;
-  try {
-    const dict = typeof tags === "string" ? JSON.parse(tags) : tags;
-    return dict ? dict[key] : undefined;
-  } catch (error) {
-    return undefined;
-  }
-}
-
-function logRetag(osmType, id, key, value, previous) {
-  const path = `/api/network/${osmType === "way" ? "ways" : "nodes"}/${id}`;
-  logRequestEdit(
-    key === "highway" && osmType === "way"
-      ? "Way reclassified"
-      : `${osmType === "way" ? "Way" : "Node"} retagged`,
-    `${osmType}/${id} ${key}=${value}`,
-    previous == null
-      ? null // no old value known: logged, not undoable
-      : { method: "PATCH", path, body: { tags: { [key]: previous } } },
-    { method: "PATCH", path, body: { tags: { [key]: value } } },
-  );
-}
-
-export async function retagNetworkWay(key, value) {
-  const selected = store.network.selected;
-  if (!selected || !key.trim()) return;
-  const previous = previousTagValue(selected, key.trim());
-  try {
-    await api("PATCH", `/api/network/ways/${selected.id}`, {
-      tags: { [key.trim()]: value },
-    });
-    store.network.selected = { ...selected, [key.trim()]: value };
-    await mapBridge.fetchNetwork();
-    store.status = "";
-    store.dirty = true;
-    logRetag("way", selected.id, key.trim(), value, previous);
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-export function startMoveNode() {
-  const selected = store.network.selected;
-  if (!selected) return;
-  store.network.movingNode = selected.id;
-  store.status = "click the new location of the node";
-  mapBridge.setCursor("crosshair");
-}
-
-export async function deleteNetworkNode() {
-  const selected = store.network.selected;
-  if (!selected) return;
-  try {
-    await api("DELETE", `/api/network/nodes/${selected.id}`);
-    store.network.selected = null;
-    mapBridge.setSelectedNetworkFeature(null);
-    await mapBridge.fetchNetwork();
-    store.status = "";
-    store.dirty = true;
-    logPlain("Node deleted", `node/${selected.id}`, NETWORK_FEED);
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-export async function retagNetworkNode(key, value) {
-  const selected = store.network.selected;
-  if (!selected || !key.trim()) return;
-  const previous = previousTagValue(selected, key.trim());
-  try {
-    await api("PATCH", `/api/network/nodes/${selected.id}`, {
-      tags: { [key.trim()]: value },
-    });
-    // reflect the tag on the still-selected node without a re-click
-    store.network.selected = { ...selected, [key.trim()]: value };
-    await mapBridge.fetchNetwork();
-    store.status = "";
-    store.dirty = true;
-    logRetag("node", selected.id, key.trim(), value, previous);
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-export async function saveNetwork(path) {
-  if (!path.trim()) return;
-  try {
-    const body = await api("POST", "/api/network/save", { path: path.trim() });
-    store.status = `network saved to ${body.path}`;
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-export async function resetNetwork() {
-  try {
-    await api("POST", "/api/network/reset");
-    store.network.selected = null;
-    mapBridge.setSelectedNetworkFeature(null);
-    setNetworkMode("select"); // clears an in-progress draw and its preview
-    await mapBridge.fetchNetwork();
-    store.status = "network edits discarded";
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-let resolveSeq = 0;
-
-export async function resolveOsm(aoi) {
-  const acquire = store.network.acquire;
-  const seq = ++resolveSeq; // only the latest resolve may write the result
-  acquire.resolving = true;
-  acquire.error = "";
-  acquire.resolved = null;
-  try {
-    const resolved = await api("POST", "/api/osm/resolve", { aoi });
-    if (seq !== resolveSeq) return;
-    acquire.resolved = resolved;
-    store.status = "";
-  } catch (error) {
-    if (seq !== resolveSeq) return;
-    acquire.error = error.message;
-  } finally {
-    if (seq === resolveSeq) acquire.resolving = false;
-  }
-}
-
-export function resolveOsmByPlace() {
-  const place = store.network.acquire.place.trim();
-  if (place) resolveOsm(place);
-}
-
-export function resolveOsmByView() {
-  const bbox = mapBridge.getViewportBbox();
-  if (bbox) {
-    resolveOsm(bbox);
-  } else {
-    // A failed new request must invalidate any prior resolved extract so its
-    // Download button can't act on a stale AOI.
-    store.network.acquire.resolved = null;
-    store.network.acquire.error = "the current map view is not a valid area";
-  }
-}
-
-export function resolveOsmByDrawn() {
-  if (store.aoi) resolveOsm(store.aoi);
-  else store.network.acquire.error = "draw an area on the map first";
-}
-
-export function cancelAcquire() {
-  store.network.acquire.resolved = null;
-  store.network.acquire.error = "";
-}
-
 export { startAoiDraw, clearAoi } from "./map.js";
-
-export async function acquireOsm(discardEdits = false) {
-  const net = store.network;
-  const acquire = net.acquire;
-  const resolved = acquire.resolved;
-  if (!resolved || acquire.downloading) return;
-  // An in-progress draw/move references the current network and would be
-  // discarded by the swap; confirm rather than dropping it silently.
-  const hasDraft = net.draw.length > 0 || net.movingNode != null;
-  if (hasDraft && !discardEdits) {
-    if (
-      !window.confirm(
-        "Discard the in-progress drawing and acquire a new extract?",
-      )
-    )
-      return;
-  }
-  acquire.downloading = true;
-  acquire.error = "";
-  try {
-    const downloaded = await api("POST", "/api/osm/download", {
-      bbox: resolved.bbox,
-      url: resolved.url,
-      discard_edits: discardEdits,
-    });
-    net.source = downloaded.path;
-  } catch (error) {
-    // 409 on submitted-but-unsaved edits: confirm discarding, then retry once.
-    if (
-      error.status === 409 &&
-      !discardEdits &&
-      /unsaved network edits/.test(error.message)
-    ) {
-      acquire.downloading = false;
-      if (
-        window.confirm(
-          "Discard unsaved network edits and load the new extract?",
-        )
-      ) {
-        return acquireOsm(true);
-      }
-      return;
-    }
-    acquire.error = error.message;
-    acquire.downloading = false;
-    return;
-  }
-  // The network changed: reset view state and render the new one.
-  net.available = true;
-  net.loaded = false;
-  net.selected = null;
-  mapBridge.setSelectedNetworkFeature(null);
-  net.error = "";
-  setNetworkMode("select"); // clears any in-progress draw/move
-  try {
-    await mapBridge.mapReady;
-    await mapBridge.fetchNetwork();
-    net.loaded = true;
-    mapBridge.setNetworkVisible(net.visible);
-    mapBridge.fitBbox(resolved.bbox);
-    await mapBridge.refreshSummary(); // snapping is now available
-    store.status = `loaded OSM extract "${resolved.name}"`;
-  } catch (error) {
-    net.error = error.message;
-  } finally {
-    acquire.downloading = false;
-    acquire.resolved = null;
-    acquire.place = "";
-  }
-}
-
-export function toggleNetworkVisible() {
-  store.network.visible = !store.network.visible;
-  mapBridge.setNetworkVisible(store.network.visible);
-}
 
 export function toggleFeedVisible() {
   store.feedVisible = !store.feedVisible;
@@ -718,7 +399,7 @@ export async function loadSession(flags = {}) {
     // survive into the new session; bump the resolve seq so an in-flight
     // resolve cannot repopulate it either
     store.merge.selected = []; // ids from the replaced catalogue
-    resolveSeq += 1;
+    invalidateResolve(); // an in-flight resolve must not repopulate acquire
     mapBridge.invalidateNetwork(); // an in-flight fetch must not repaint
     Object.assign(store.network.acquire, {
       place: "",
@@ -731,14 +412,13 @@ export async function loadSession(flags = {}) {
       loaded: false,
       loading: false,
       selected: null,
+      editing: false,
+      vertexEdit: false,
+      savePath: "",
       nodeCount: 0,
       wayCount: 0,
-      mode: "select",
-      movingNode: null,
-      draw: [],
       error: "",
     });
-    mapBridge.clearNetworkDraw(); // a way begun against the old extract
     mapBridge.setNetworkData(
       { type: "FeatureCollection", features: [] },
       { type: "FeatureCollection", features: [] },

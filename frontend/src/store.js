@@ -1,6 +1,7 @@
 import { reactive } from "vue";
 
 import { DEFAULT_BASEMAP } from "./basemaps.js";
+import { DEFAULT_HIDDEN_CLASSES } from "./streets.js";
 
 // pyrosm tag filters behind the snap-network presets; "streets" uses the
 // server's default network (no filter).
@@ -118,12 +119,12 @@ export const store = reactive({
     loaded: false, // node/way GeoJSON fetched into the map
     loading: false,
     visible: true, // layer visibility toggle
+    editing: false, // the Streets panel's own editing toggle
+    vertexEdit: false, // shape-vertex handles shown for the selected way
     nodeCount: 0,
     wayCount: 0,
-    selected: null, // inspected feature properties, or null
-    mode: "select", // "select" | "add-node" | "draw-way"
-    movingNode: null, // id of a node awaiting its new location
-    draw: [], // vertices of a way being drawn: [{ vertex, coord }]
+    selected: null, // inspected way properties, or null
+    savePath: "", // where Save writes the edited .osm.pbf
     error: "",
     acquire: {
       place: "", // place-name input for OSM extract acquisition
@@ -133,6 +134,9 @@ export const store = reactive({
       error: "",
     },
   },
+  // Highway classes hidden from the map and the way list (legend filter).
+  hiddenHighwayClasses: [...DEFAULT_HIDDEN_CLASSES],
+  networkVersion: 0, // bumped when network data changes; lists recompute
   search: {
     q: "", // one box: a place name, geocoded and flown to
     officialOnly: false,

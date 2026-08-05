@@ -5,12 +5,9 @@ import { store } from "./store.js";
 import { currentFeed, initialPanel } from "./catalogue.js";
 import { createMap } from "./map.js";
 import { editTarget } from "./network.js";
-import {
-  checkNetworkAvailable,
-  refreshAfterHistory,
-  toggleEditMode,
-} from "./actions.js";
+import { refreshAfterHistory, toggleEditMode } from "./actions.js";
 import { loadCatalogue, setCurrentFeed } from "./actions/catalogue.js";
+import { checkNetworkAvailable } from "./actions/streets.js";
 import { configureSession, sessionRedo, sessionUndo } from "./session.js";
 import { undoShortcut } from "./undo.js";
 import AppHeader from "./components/AppHeader.vue";
@@ -19,6 +16,7 @@ import NavRail from "./components/NavRail.vue";
 import RoutesPanel from "./components/RoutesPanel.vue";
 import SessionDrawer from "./components/SessionDrawer.vue";
 import StopsPanel from "./components/StopsPanel.vue";
+import StreetsPanel from "./components/StreetsPanel.vue";
 import Toasts from "./components/Toasts.vue";
 import AttributeTable from "./components/AttributeTable.vue";
 import BasemapControl from "./components/BasemapControl.vue";
@@ -27,7 +25,6 @@ import MapToolbar from "./components/MapToolbar.vue";
 import AgencyServiceForm from "./components/AgencyServiceForm.vue";
 import CropPanel from "./components/CropPanel.vue";
 import CurrentFeedBar from "./components/CurrentFeedBar.vue";
-import NetworkPanel from "./components/NetworkPanel.vue";
 import RouteLegend from "./components/RouteLegend.vue";
 import SearchPanel from "./components/SearchPanel.vue";
 import StopInspector from "./components/StopInspector.vue";
@@ -115,7 +112,7 @@ onMounted(async () => {
     >
       <!-- Ported panels render their own header. -->
       <div
-        v-if="!['data', 'stops', 'routes'].includes(store.activePanel)"
+        v-if="!['data', 'stops', 'routes', 'streets'].includes(store.activePanel)"
         class="panel-title"
       >
         {{ PANEL_TITLES[store.activePanel] }}
@@ -156,9 +153,7 @@ onMounted(async () => {
         </p>
       </div>
 
-      <div v-show="store.activePanel === 'streets'" class="legacy">
-        <NetworkPanel />
-      </div>
+      <StreetsPanel v-show="store.activePanel === 'streets'" />
 
       <div v-show="store.activePanel === 'validate'" class="legacy">
         <CurrentFeedBar />

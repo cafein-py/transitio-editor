@@ -6,8 +6,15 @@ import "maplibre-gl/dist/maplibre-gl.css";
 
 import { api } from "./api.js";
 import { BASEMAPS, basemapLayerId } from "./basemaps.js";
-import { setStopsData } from "./entities.js";
-import { logPlain, logRequestEdit, logServerEdit, NETWORK_FEED } from "./session.js";
+import { setNetworkEntities, setStopsData } from "./entities.js";
+import {
+  initStreetsHandles,
+  initStreetsLayers,
+  refreshStreets,
+  selectWay,
+  setStreetsVisible,
+} from "./map/streets.js";
+import { logServerEdit } from "./session.js";
 import { SNAP_FILTERS, store } from "./store.js";
 import { cropShapeFromRing } from "./catalogue.js";
 import { editTarget } from "./network.js";
@@ -546,7 +553,7 @@ export function createMap() {
 
   map.on("load", async () => {
     syncBasemapLayers(); // a choice made before the style built lands now
-    for (const id of ["stops", "shapes", "network-ways", "network-nodes"]) {
+    for (const id of ["stops", "shapes", "network-ways"]) {
       map.addSource(id, {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
@@ -610,32 +617,9 @@ export function createMap() {
         "circle-stroke-width": 2,
       },
     });
-    // OSM network under the GTFS layers: ways always, nodes only when zoomed
-    // in (a whole-city node layer is too dense otherwise).
-    map.addLayer({
-      id: "network-ways",
-      type: "line",
-      source: "network-ways",
-      layout: { visibility: "none" },
-      paint: {
-        "line-color": "#7a4fbf",
-        "line-width": 1.5,
-        "line-opacity": 0.6,
-      },
-    });
-    map.addLayer({
-      id: "network-nodes",
-      type: "circle",
-      source: "network-nodes",
-      minzoom: 15,
-      layout: { visibility: "none" },
-      paint: {
-        "circle-radius": 3,
-        "circle-color": "#7a4fbf",
-        "circle-stroke-color": "#fff",
-        "circle-stroke-width": 1,
-      },
-    });
+    // The street network under the GTFS layers, styled by highway class
+    // (the design's colour/width/dash scale lives in map/streets.js).
+    initStreetsLayers(map, { refreshNetwork: fetchNetwork });
     // A white casing under the route lines separates them from the busy
     // basemap (and from each other), keeping even light hues readable.
     map.addLayer({
@@ -665,23 +649,6 @@ export function createMap() {
       source: "preview",
       paint: {
         "line-color": "#c0392b",
-        "line-width": 3,
-        "line-dasharray": [2, 1],
-      },
-    });
-    map.addSource("network-preview", {
-      type: "geojson",
-      data: {
-        type: "Feature",
-        geometry: { type: "LineString", coordinates: [] },
-      },
-    });
-    map.addLayer({
-      id: "network-preview",
-      type: "line",
-      source: "network-preview",
-      paint: {
-        "line-color": "#7a4fbf",
         "line-width": 3,
         "line-dasharray": [2, 1],
       },
@@ -802,37 +769,8 @@ export function createMap() {
         ],
       },
     });
-    map.addLayer(
-      {
-        id: "network-ways-selected",
-        type: "line",
-        source: "network-ways",
-        filter: NO_SELECTION,
-        layout: { visibility: "none" },
-        paint: {
-          "line-color": SELECT_COLOR,
-          "line-width": 10.5,
-          "line-opacity": 0.85,
-        },
-      },
-      "network-ways",
-    );
-    map.addLayer(
-      {
-        id: "network-nodes-selected",
-        type: "circle",
-        source: "network-nodes",
-        minzoom: 15,
-        filter: NO_SELECTION,
-        layout: { visibility: "none" },
-        paint: {
-          "circle-radius": 10,
-          "circle-color": SELECT_COLOR,
-          "circle-opacity": 0.9,
-        },
-      },
-      "network-nodes",
-    );
+    // Vertex handles above everything, including the GTFS layers.
+    initStreetsHandles(map);
 
     map.on("click", "stops", (event) => {
       if (store.aoiDrawing || croppingClick()) return; // a drawing gesture
@@ -884,41 +822,6 @@ export function createMap() {
       }
       event.preventDefault();
     });
-    // One handler over both network layers: two separate listeners would
-    // both fire where a node sits on its way and race to set the selection.
-    map.on("click", ["network-nodes", "network-ways"], (event) => {
-      if (event.defaultPrevented || store.aoiDrawing || croppingClick()) return;
-      // In add-node/move-node/draw-way mode a click on a road/node is a
-      // placement, not a selection: fall through to the general handler.
-      if (
-        editTarget(store.activePanel) === "network" &&
-        (store.network.mode === "add-node" ||
-          store.network.mode === "draw-way" ||
-          store.network.movingNode != null)
-      ) {
-        return;
-      }
-      if (editTarget(store.activePanel) !== "network") {
-        // On the feed tab the network is context. Hint only when the click
-        // hit no feed feature — a stop or shape under the same click must
-        // stay selectable, so never preventDefault here.
-        const feedHit = map.queryRenderedFeatures(event.point, {
-          layers: ["stops", "shapes"],
-        }).length;
-        if (!feedHit && store.mode === "select" && !store.movingStop) {
-          store.status = "switch to the Streets panel to inspect the network";
-        }
-        return;
-      }
-      const feature =
-        event.features.find((f) => f.properties.osm_type === "node") ||
-        event.features[0];
-      store.network.selected = { ...feature.properties };
-      setSelectedNetworkFeature(feature.properties);
-      store.status = "";
-      event.preventDefault();
-    });
-
     // Attribute cards: hovering a feature while viewing shows its key
     // attributes; clicking a shape pins the card. Values enter the DOM via
     // textContent only.
@@ -1030,7 +933,9 @@ export function createMap() {
       }
       if (event.defaultPrevented || store.aoiDrawing || croppingClick()) return;
       if (editTarget(store.activePanel) === "network") {
-        handleNetworkClick(event);
+        // An empty streets click deselects the way (way clicks arrive
+        // default-prevented from the class-layer handler).
+        selectWay(null);
         return;
       }
       if (store.editMode) {
@@ -1146,7 +1051,9 @@ export function createMap() {
 export function setNetworkData(nodes, ways) {
   if (!map || !map.getSource("network-ways")) return; // style not built yet
   map.getSource("network-ways").setData(ways);
-  map.getSource("network-nodes").setData(nodes);
+  setNetworkEntities(nodes, ways);
+  store.networkVersion += 1; // the Streets panel lists recompute
+  refreshStreets(); // selection card + vertex handles follow the data
 }
 
 // Refetch the network into the map (after an edit or the initial load). One
@@ -1169,91 +1076,6 @@ export async function fetchNetwork() {
   return true;
 }
 
-// Map-click edits to the network (add/move a node), the network-side
-// counterpart of handleMapClick; button edits live in actions.js.
-function renderNetworkPreview() {
-  const source = map && map.getSource("network-preview");
-  if (source) {
-    source.setData({
-      type: "Feature",
-      geometry: {
-        type: "LineString",
-        coordinates: store.network.draw.map((v) => v.coord),
-      },
-    });
-  }
-}
-
-export function clearNetworkDraw() {
-  store.network.draw = [];
-  renderNetworkPreview();
-}
-
-async function handleNetworkClick(event) {
-  const net = store.network;
-  // Acquisition is swapping the network out; ignore edits until it settles,
-  // so a click can't act on the old (or mid-swap) features.
-  if (net.acquire.downloading) return;
-  const { lng, lat } = event.lngLat;
-  if (net.mode === "draw-way") {
-    // Resolve the click against what is under it: an existing node is reused,
-    // an existing way is split into a junction, empty space is a new node.
-    const under = map.queryRenderedFeatures(event.point, {
-      layers: ["network-nodes", "network-ways"],
-    });
-    const node = under.find((f) => f.properties.osm_type === "node");
-    const way = under.find((f) => f.properties.osm_type === "way");
-    let vertex;
-    if (node) vertex = { node: node.properties.id };
-    else if (way) vertex = { split_way: way.properties.id, lon: lng, lat };
-    else vertex = { lon: lng, lat };
-    net.draw.push({ vertex, coord: [lng, lat] });
-    renderNetworkPreview();
-    return;
-  }
-  try {
-    if (net.movingNode != null) {
-      const nodeId = net.movingNode;
-      // The pre-move position, for the compensating undo PATCH; the
-      // selection card still holds the node the move started from.
-      const previous =
-        net.selected && net.selected.id === nodeId
-          ? { lon: net.selected.lon, lat: net.selected.lat }
-          : null;
-      await api("PATCH", `/api/network/nodes/${nodeId}`, {
-        lon: lng,
-        lat,
-      });
-      const path = `/api/network/nodes/${nodeId}`;
-      logRequestEdit(
-        "Node moved",
-        `node/${nodeId}`,
-        previous && Number.isFinite(previous.lon)
-          ? { method: "PATCH", path, body: previous }
-          : null,
-        { method: "PATCH", path, body: { lon: lng, lat } },
-      );
-      net.movingNode = null;
-      store.status = "";
-      store.dirty = true;
-      await fetchNetwork();
-      return;
-    }
-    if (net.mode === "add-node") {
-      await api("POST", "/api/network/nodes", { lon: lng, lat });
-      logPlain(
-        "Node added",
-        `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
-        NETWORK_FEED,
-      );
-      store.dirty = true;
-      await fetchNetwork();
-    }
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
 function setGroupVisible(layers, visible) {
   if (!map) return;
   const value = visible ? "visible" : "none";
@@ -1264,16 +1086,10 @@ function setGroupVisible(layers, visible) {
   }
 }
 
+// Street-network visibility routes through the streets module (it knows
+// the per-class hidden set).
 export function setNetworkVisible(visible) {
-  setGroupVisible(
-    [
-      "network-ways",
-      "network-nodes",
-      "network-ways-selected",
-      "network-nodes-selected",
-    ],
-    visible,
-  );
+  setStreetsVisible(visible);
 }
 
 export function setFeedVisible(visible) {
@@ -1327,22 +1143,6 @@ export function setSelectedShapes(shapeIds, feedId) {
       ]
     : NO_SELECTION;
   map.setFilter("shapes-selected", withModeFilter(selectedShapeFilter));
-}
-
-export function setSelectedNetworkFeature(properties) {
-  if (!map || !map.getLayer("network-ways-selected")) return;
-  map.setFilter(
-    "network-ways-selected",
-    properties && properties.osm_type === "way"
-      ? ["==", ["get", "id"], properties.id]
-      : NO_SELECTION,
-  );
-  map.setFilter(
-    "network-nodes-selected",
-    properties && properties.osm_type === "node"
-      ? ["==", ["get", "id"], properties.id]
-      : NO_SELECTION,
-  );
 }
 
 export function clearFeedSelection() {
