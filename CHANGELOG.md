@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- Sessions: "Save session" on the Data tab writes one JSON file recording
+  everything loaded — the feeds (by path, with checksums; merged/cropped/
+  built feeds that exist nowhere on disk are embedded as zips in a
+  ``<name>.data`` directory next to the session file), groups, colors,
+  the active/current flags, the OSM extract, the basemap, hidden modes
+  and the map view — and "Load session" brings it all back, camera
+  included. Loading warns before replacing loaded feeds or discarding
+  unsaved OSM edits (each separately), skips feeds whose files have gone
+  missing with a report, and flags files that changed since the session
+  was saved. Nothing in the data directory is ever overwritten or
+  deleted (``POST /api/session/save`` / ``POST /api/session/restore``).
+
 ## 0.7.1 — 2026-08-04
 
 ### Added

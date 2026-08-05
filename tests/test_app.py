@@ -2767,3 +2767,344 @@ def test_bad_paths_are_client_errors(editor):
         ).status_code
         == 422
     )
+
+
+def test_session_save_restore_round_trip(tmp_path):
+    source = _write_feed_at(tmp_path / "city.zip", [("in1", *INSIDE)])
+    client = TestClient(create_app(FeedEditor(source)))
+    other = _write_feed_at(tmp_path / "other.zip", [("z1", *OUTSIDE)])
+    second = client.post(
+        "/api/catalogue", json={"path": str(other), "name": "Other"}
+    ).json()
+    # a sourceless feed (merged in memory) must be embedded by the save
+    first_id = client.get("/api/catalogue").json()["feeds"][0]["feed_id"]
+    merged = client.post(
+        "/api/catalogue/merge",
+        json={"feed_ids": [first_id, second["feed_id"]], "name": "Merged"},
+    ).json()
+    client.post("/api/catalogue/groups", json={"name": "Mine"})
+    client.patch(f"/api/catalogue/{merged['feed_id']}", json={"group": "Mine"})
+    client.patch(f"/api/catalogue/{second['feed_id']}", json={"active": False})
+    client.put("/api/catalogue/current", json={"feed_id": second["feed_id"]})
+
+    session = tmp_path / "work" / "helsinki.json"
+    view = {"basemap": "dark", "camera": {"center": [24.9, 60.2], "zoom": 9}}
+    saved = client.post("/api/session/save", json={"path": str(session), "view": view})
+    assert saved.status_code == 200
+    body = saved.json()
+    assert body["embedded"] == ["Merged"]
+    assert set(body["referenced"]) == {"city.zip", "Other"}
+    assert session.exists()
+    import json as json_module
+
+    on_disk = json_module.loads(session.read_text())
+    assert on_disk["transitio_editor_session"] == 1
+    assert on_disk["view"] == view
+    data_dir = tmp_path / "work" / "helsinki.data"
+    assert len(list(data_dir.glob("*.zip"))) == 1  # the embedded feed only
+
+    # a fresh app restores the lot
+    restore_client = TestClient(create_app())
+    restored = restore_client.post("/api/session/restore", json={"path": str(session)})
+    assert restored.status_code == 200
+    result = restored.json()
+    assert result["view"] == view
+    assert result["skipped"] == [] and result["warnings"] == []
+    feeds = result["feeds"]
+    assert [feed["name"] for feed in feeds] == ["city.zip", "Other", "Merged"]
+    before = {
+        feed["name"]: feed for feed in client.get("/api/catalogue").json()["feeds"]
+    }
+    for feed in feeds:
+        assert feed["color"] == before[feed["name"]]["color"]
+        assert feed["active"] == before[feed["name"]]["active"]
+        assert feed["group"] == before[feed["name"]]["group"]
+        assert feed["origin"] == before[feed["name"]]["origin"]
+        assert feed["tables"] == before[feed["name"]]["tables"]
+        assert feed["current"] == (feed["name"] == "Other")
+    # the embedded feed is sourceless again: its zip is session storage
+    assert before["Merged"]["source"] is None
+    assert next(f for f in feeds if f["name"] == "Merged")["source"] is None
+
+    # editing the restored embedded feed and re-saving embeds the edits
+    restore_client.put(
+        "/api/catalogue/current",
+        json={"feed_id": next(f for f in feeds if f["name"] == "Merged")["feed_id"]},
+    )
+    stop = restore_client.get("/api/tables/stops.txt").json()["rows"][0]["stop_id"]
+    restore_client.patch(f"/api/stops/{stop}", json={"stop_name": "Edited"})
+    second_save = restore_client.post(
+        "/api/session/save", json={"path": str(session)}
+    ).json()
+    assert second_save["embedded"] == ["Merged"]
+    assert second_save["unreferenced_data_files"] == 1  # the first zip, kept
+    assert len(list(data_dir.glob("*.zip"))) == 2  # fresh zip, old one left
+
+    third = TestClient(create_app())
+    third.post("/api/session/restore", json={"path": str(session)})
+    third.put(
+        "/api/catalogue/current",
+        json={
+            "feed_id": next(
+                f
+                for f in third.get("/api/catalogue").json()["feeds"]
+                if f["name"] == "Merged"
+            )["feed_id"]
+        },
+    )
+    rows = third.get("/api/tables/stops.txt").json()["rows"]
+    assert "Edited" in {row["stop_name"] for row in rows}
+
+
+def test_session_restore_guards_and_skips(tmp_path):
+    source = _write_feed_at(tmp_path / "city.zip", [("in1", *INSIDE)])
+    client = TestClient(create_app(FeedEditor(source)))
+    session = tmp_path / "s.json"
+    client.post("/api/session/save", json={"path": str(session)})
+
+    # loaded feeds require replace (an empty user group alone does too)
+    conflict = client.post("/api/session/restore", json={"path": str(session)})
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["reason"] == "feeds"
+    grouped = TestClient(create_app())
+    grouped.post("/api/catalogue/groups", json={"name": "Empty"})
+    assert (
+        grouped.post("/api/session/restore", json={"path": str(session)}).status_code
+        == 409
+    )
+    ok = client.post(
+        "/api/session/restore", json={"path": str(session), "replace": True}
+    )
+    assert ok.status_code == 200
+
+    # a missing referenced file is a skip, not a failure; the first
+    # restored feed becomes current when the recorded one was skipped
+    other = _write_feed_at(tmp_path / "gone.zip", [("z1", *OUTSIDE)])
+    client.post("/api/catalogue", json={"path": str(other), "name": "Gone"})
+    gone_id = next(
+        f for f in client.get("/api/catalogue").json()["feeds"] if f["name"] == "Gone"
+    )["feed_id"]
+    client.put("/api/catalogue/current", json={"feed_id": gone_id})
+    client.post("/api/session/save", json={"path": str(session)})
+    os.unlink(other)
+    result = client.post(
+        "/api/session/restore", json={"path": str(session), "replace": True}
+    ).json()
+    assert [skip["name"] for skip in result["skipped"]] == ["Gone"]
+    assert any("current" in warning for warning in result["warnings"])
+    assert [feed["name"] for feed in result["feeds"]] == ["city.zip"]
+    assert result["feeds"][0]["current"] is True
+
+    # a modified source restores with the checksum warning
+    _write_feed_at(tmp_path / "city.zip", [("in1", *INSIDE), ("in2", 60.18, 24.95)])
+    warned = client.post(
+        "/api/session/restore", json={"path": str(session), "replace": True}
+    ).json()
+    assert any("changed since" in warning for warning in warned["warnings"])
+
+
+def test_session_save_and_restore_reject_bad_input(tmp_path):
+    client = TestClient(create_app(FeedBuilder()))
+    for body in ({}, {"path": 5}, {"path": "s.txt"}, {"path": " "}):
+        assert client.post("/api/session/save", json=body).status_code == 422
+        assert client.post("/api/session/restore", json=body).status_code == 422
+    assert (
+        client.post(
+            "/api/session/save", json={"path": str(tmp_path / "s.json"), "view": 5}
+        ).status_code
+        == 422
+    )
+    missing = client.post(
+        "/api/session/restore", json={"path": str(tmp_path / "absent.json")}
+    )
+    assert missing.status_code == 422
+    bad = tmp_path / "bad.json"
+    bad.write_text("not json")
+    assert (
+        client.post("/api/session/restore", json={"path": str(bad)}).status_code == 422
+    )
+    wrong = tmp_path / "wrong.json"
+    wrong.write_text('{"transitio_editor_session": 99}')
+    assert (
+        client.post("/api/session/restore", json={"path": str(wrong)}).status_code
+        == 422
+    )
+    # a foreign non-empty directory where the data dir would go is refused
+    source = _write_feed_at(tmp_path / "seed.zip", [("s", *INSIDE)])
+    with_embedded = TestClient(create_app(FeedEditor(source)))
+    first = with_embedded.get("/api/catalogue").json()["feeds"][0]["feed_id"]
+    other = _write_feed_at(tmp_path / "o.zip", [("z", *OUTSIDE)])
+    second = with_embedded.post("/api/catalogue", json={"path": str(other)}).json()
+    with_embedded.post(
+        "/api/catalogue/merge", json={"feed_ids": [first, second["feed_id"]]}
+    )
+    foreign = tmp_path / "mine.data"
+    foreign.mkdir()
+    (foreign / "precious.txt").write_text("keep me")
+    refused = with_embedded.post(
+        "/api/session/save", json={"path": str(tmp_path / "mine.json")}
+    )
+    assert refused.status_code == 422
+    assert (foreign / "precious.txt").read_text() == "keep me"
+
+
+def test_session_round_trips_osm_source(tmp_path, monkeypatch):
+    source = _write_feed_at(tmp_path / "city.zip", [("in1", *INSIDE)])
+    extract = tmp_path / "area.osm.pbf"
+    extract.write_bytes(b"pbf")
+    client = TestClient(create_app(FeedEditor(source), osm_pbf=extract))
+    session = tmp_path / "s.json"
+    client.post("/api/session/save", json={"path": str(session)})
+
+    fresh = TestClient(create_app())
+    body = fresh.post("/api/session/restore", json={"path": str(session)}).json()
+    assert body["warnings"] == []
+    # the source is re-pointed without the network having been loaded
+    network = fresh.get("/api/network").json()
+    assert network["source"] == str(extract)
+    assert "nodes" not in network  # counts appear only once loaded
+
+    # a vanished extract is a warning and cleared state, not a failure
+    os.unlink(extract)
+    cleared = TestClient(create_app())
+    result = cleared.post("/api/session/restore", json={"path": str(session)}).json()
+    assert any("OSM extract not found" in warning for warning in result["warnings"])
+    assert cleared.get("/api/network").json()["available"] is False
+
+
+def test_fs_dirs_lists_session_files(editor, tmp_path):
+    client = TestClient(create_app(editor))
+    root = tmp_path / "browse"
+    root.mkdir()
+    (root / "helsinki.json").write_text("{}")
+    (root / ".hidden.json").write_text("{}")
+    (root / "feed.zip").write_bytes(b"x")
+    body = client.get("/api/fs/dirs", params={"path": str(root)}).json()
+    assert body["sessions"] == ["helsinki.json"]
+    assert body["feeds"] == ["feed.zip"]
+
+
+def test_session_round_trips_origin(tmp_path):
+    import json as json_module
+
+    source = _write_feed_at(tmp_path / "city.zip", [("in1", *INSIDE)])
+    session = tmp_path / "s.json"
+    session.write_text(
+        json_module.dumps(
+            {
+                "transitio_editor_session": 1,
+                "groups": [],
+                "feeds": [
+                    {
+                        "name": "Downloaded",
+                        "source": str(source),
+                        "sha256": None,
+                        "color": None,
+                        "group": None,
+                        "origin": "mdb-123",
+                        "active": True,
+                        "current": True,
+                        "embedded": False,
+                    }
+                ],
+                "view": {},
+                "osm_source": None,
+            }
+        )
+    )
+    client = TestClient(create_app())
+    restored = client.post("/api/session/restore", json={"path": str(session)})
+    assert restored.json()["feeds"][0]["origin"] == "mdb-123"
+    # and a re-save carries it forward
+    client.post("/api/session/save", json={"path": str(tmp_path / "again.json")})
+    saved = json_module.loads((tmp_path / "again.json").read_text())
+    assert saved["feeds"][0]["origin"] == "mdb-123"
+
+
+def test_session_restore_needs_both_consents(tmp_path):
+    source = _write_feed_at(tmp_path / "city.zip", [("in1", *INSIDE)])
+    session_source = TestClient(create_app(FeedEditor(source)))
+    session = tmp_path / "s.json"
+    session_source.post("/api/session/save", json={"path": str(session)})
+
+    dirty = TestClient(
+        create_app(FeedEditor(source), osm_pbf=_osm_pbf(), network_type="driving")
+    )
+    assert (
+        dirty.post(
+            "/api/network/nodes", json={"lon": 26.94, "lat": 60.52, "tags": {}}
+        ).status_code
+        == 200
+    )
+    # loaded feeds and unsaved network edits are two separate refusals:
+    # confirming one must not silently authorise the other
+    first = dirty.post("/api/session/restore", json={"path": str(session)})
+    assert first.status_code == 409 and first.json()["detail"]["reason"] == "feeds"
+    second = dirty.post(
+        "/api/session/restore", json={"path": str(session), "replace": True}
+    )
+    assert (
+        second.status_code == 409 and second.json()["detail"]["reason"] == "osm-edits"
+    )
+    third = dirty.post(
+        "/api/session/restore",
+        json={"path": str(session), "replace": True, "discard_edits": True},
+    )
+    assert third.status_code == 200
+    # the session had no OSM source, so the loaded network is gone
+    assert dirty.get("/api/network").json()["available"] is False
+
+
+@pytest.mark.skipif(os.name == "nt", reason="read-only directories are POSIX")
+def test_session_save_rejects_unwritable_destination(tmp_path):
+    import stat
+
+    source = _write_feed_at(tmp_path / "city.zip", [("in1", *INSIDE)])
+    client = TestClient(create_app(FeedEditor(source)))
+    sealed = tmp_path / "sealed"
+    sealed.mkdir()
+    sealed.chmod(stat.S_IRUSR | stat.S_IXUSR)
+    try:
+        refused = client.post(
+            "/api/session/save", json={"path": str(sealed / "s.json")}
+        )
+        assert refused.status_code == 422
+    finally:
+        sealed.chmod(0o755)
+    assert list(sealed.iterdir()) == []  # no leaked temp file
+
+
+@pytest.mark.skipif(os.name == "nt", reason="read-only directories are POSIX")
+def test_failed_session_save_keeps_the_previous_one(tmp_path):
+    import json as json_module
+    import stat
+
+    source = _write_feed_at(tmp_path / "seed.zip", [("s", *INSIDE)])
+    client = TestClient(create_app(FeedEditor(source)))
+    first = client.get("/api/catalogue").json()["feeds"][0]["feed_id"]
+    other = _write_feed_at(tmp_path / "o.zip", [("z", *OUTSIDE)])
+    second = client.post("/api/catalogue", json={"path": str(other)}).json()
+    client.post(
+        "/api/catalogue/merge",
+        json={"feed_ids": [first, second["feed_id"]], "name": "Merged"},
+    )
+    session = tmp_path / "s.json"
+    assert (
+        client.post("/api/session/save", json={"path": str(session)}).status_code == 200
+    )
+    before = session.read_text()
+    zips = list((tmp_path / "s.data").glob("*.zip"))
+
+    (tmp_path / "s.data").chmod(stat.S_IRUSR | stat.S_IXUSR)  # no writing
+    try:
+        failed = client.post("/api/session/save", json={"path": str(session)})
+        assert failed.status_code == 422
+    finally:
+        (tmp_path / "s.data").chmod(0o755)
+    # the previous session and its zips are untouched and still restore
+    assert session.read_text() == before
+    assert list((tmp_path / "s.data").glob("*.zip")) == zips
+    fresh = TestClient(create_app())
+    restored = fresh.post("/api/session/restore", json={"path": str(session)})
+    assert restored.status_code == 200
+    assert json_module.loads(session.read_text())["transitio_editor_session"] == 1

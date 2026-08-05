@@ -14,8 +14,10 @@ export async function api(method, path, body) {
     } catch (error) {
       /* not JSON */
     }
-    const error = new Error(`${method} ${path}: ${detail}`);
+    const text = typeof detail === "string" ? detail : JSON.stringify(detail);
+    const error = new Error(`${method} ${path}: ${text}`);
     error.status = response.status;
+    error.detail = detail; // structured 409 details keep their shape
     throw error;
   }
   return response.json();

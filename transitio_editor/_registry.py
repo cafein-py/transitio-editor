@@ -51,15 +51,22 @@ class FeedRegistry:
         # Group names in creation order; a group can exist while empty.
         self._groups = []
 
-    def add(self, editor, name, source=None, origin=None, group=None):
+    def add(self, editor, name, source=None, origin=None, group=None, color=None):
         self._counter += 1
         feed_id = f"feed-{self._counter}"
-        color = _PALETTE[(self._counter - 1) % len(_PALETTE)]
+        if color is None:
+            color = _PALETTE[(self._counter - 1) % len(_PALETTE)]
         entry = FeedEntry(feed_id, editor, name, color, source, origin, group)
         self._feeds[feed_id] = entry
         if self.current is None:
             self.current = feed_id
         return entry
+
+    def reset(self):
+        """Empty the registry (feeds, groups, current) for a session restore."""
+        self._feeds.clear()
+        self._groups.clear()
+        self.current = None
 
     # -- groups -----------------------------------------------------------
 

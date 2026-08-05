@@ -41,6 +41,15 @@ export const store = reactive({
     fullTripsOnly: false, // keep only trips entirely inside the area
     running: false,
   },
+  // The tab the user last worked in, excluding the Data tab the session
+  // buttons live on — what a saved session reopens.
+  workingTab: null,
+  session: {
+    path: "", // the session .json to save to / load from
+    saving: false,
+    loading: false,
+    confirm: null, // { reason: "feeds"|"osm-edits", feeds } awaiting the user
+  },
   merge: {
     selected: [], // feed ids ticked for merging
     name: "", // optional name for the merged feed
@@ -51,12 +60,13 @@ export const store = reactive({
   // the field the choice lands in, `mode` whether a feed file can be picked.
   browse: {
     open: false,
-    target: null, // "downloadDir" | "feedPath" | "mergeDir"
-    mode: "dir", // "dir" (choose a folder) | "feed" (choose a .zip)
+    target: null, // "downloadDir" | "feedPath" | "mergeDir" | "sessionPath"
+    mode: "dir", // "dir" (folder) | "feed" (.zip) | "session" (.json)
     path: "",
     parent: null,
     dirs: [],
     feeds: [],
+    sessions: [],
     error: "",
   },
   snapAvailable: false,

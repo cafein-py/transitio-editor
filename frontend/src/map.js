@@ -105,6 +105,25 @@ export function getViewportBbox() {
   return [minx, clampLat(sw.lat), maxx, clampLat(ne.lat)];
 }
 
+export function getCamera() {
+  if (!map) return null;
+  const center = map.getCenter();
+  return { center: [center.lng, center.lat], zoom: map.getZoom() };
+}
+
+export function jumpTo(center, zoom) {
+  if (map) map.jumpTo({ center, zoom });
+}
+
+export function fitToStops() {
+  if (!map || !lastStops || !lastStops.features.length) return;
+  const bounds = new maplibregl.LngLatBounds();
+  for (const feature of lastStops.features) {
+    bounds.extend(feature.geometry.coordinates);
+  }
+  map.fitBounds(bounds, { padding: 60, maxZoom: 15 });
+}
+
 export function fitBbox(bbox) {
   if (!map || !bbox) return;
   const [minx, miny, maxx, maxy] = bbox;
@@ -313,8 +332,12 @@ export function resetDraw() {
   renderPreview();
 }
 
+let summarySeq = 0; // a pre-restore summary must not paint over a newer one
+
 async function refreshSummary() {
+  const seq = ++summarySeq;
   const summary = await api("GET", "/api/feed");
+  if (seq !== summarySeq) return;
   store.source = summary.source;
   store.tables = summary.tables;
   store.currentFeedId = summary.currentFeedId ?? null;
@@ -327,6 +350,7 @@ async function refreshSummary() {
   // edits like adding a route with a new transport type.
   try {
     const catalogue = await api("GET", "/api/catalogue");
+    if (seq !== summarySeq) return;
     store.catalogue = catalogue.feeds;
     store.currentFeedId = catalogue.current;
   } catch (error) {
@@ -1046,18 +1070,29 @@ export function createMap() {
 }
 
 export function setNetworkData(nodes, ways) {
-  if (!map) return;
+  if (!map || !map.getSource("network-ways")) return; // style not built yet
   map.getSource("network-ways").setData(ways);
   map.getSource("network-nodes").setData(nodes);
 }
 
 // Refetch the network into the map (after an edit or the initial load). One
-// combined request keeps nodes and ways from the same editor generation.
+// combined request keeps nodes and ways from the same editor generation;
+// the sequence guard keeps a slow fetch from repainting a network that a
+// session restore has since replaced.
+let networkSeq = 0;
+
+export function invalidateNetwork() {
+  networkSeq += 1;
+}
+
 export async function fetchNetwork() {
+  const seq = ++networkSeq;
   const { nodes, ways } = await api("GET", "/api/network/features");
+  if (seq !== networkSeq) return false; // stale: a restore intervened
   setNetworkData(nodes, ways);
   store.network.nodeCount = nodes.features.length;
   store.network.wayCount = ways.features.length;
+  return true;
 }
 
 // Map-click edits to the network (add/move a node), the network-side
