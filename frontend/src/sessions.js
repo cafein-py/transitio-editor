@@ -39,7 +39,6 @@ export function sessionRestorePlan(view) {
     plan.stopsVisible = view.stops_visible;
   }
   const PANELS = [
-    "search",
     "data",
     "stops",
     "routes",
@@ -50,8 +49,9 @@ export function sessionRestorePlan(view) {
     "validate",
   ];
   // Sessions from before the redesign recorded tab names; map them to the
-  // panel that took the tab's place.
+  // panel that took the tab's place (the search tab became the palette).
   const LEGACY_TABS = {
+    search: "data",
     catalogue: "data",
     view: "data",
     network: "streets",

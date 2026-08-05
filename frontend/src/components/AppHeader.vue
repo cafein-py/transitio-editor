@@ -83,7 +83,7 @@ async function onSaveValidate() {
       </span>
     </div>
 
-    <button class="search-pill" @click="store.activePanel = 'search'">
+    <button class="search-pill" @click="store.paletteOpen = true">
       <svg viewBox="0 0 14 14" fill="none" stroke="currentColor">
         <circle cx="6" cy="6" r="3.6" stroke-width="1.5" />
         <path d="M8.8 8.8L12 12" stroke-width="1.5" stroke-linecap="round" />

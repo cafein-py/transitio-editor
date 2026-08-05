@@ -13,8 +13,10 @@ export const SNAP_FILTERS = {
 
 export const store = reactive({
   // Active left-panel key: data | stops | routes | cal | trips | agencies |
-  // streets | validate (+ search until the ⌘K palette replaces it).
+  // streets | validate.
   activePanel: "data",
+  screen: "launch", // the landing page overlays the app until entered
+  paletteOpen: false, // the ⌘K unified search
   layout: "sidebar", // header layout switcher: "sidebar" | "inspector" | "table"
   dirty: false, // edits since the workspace was last saved (header dot)
   dataVersion: 0, // bumped on layer refresh; panel lists recompute off it
@@ -40,7 +42,6 @@ export const store = reactive({
   groups: [], // user-named feed groups, in creation order
   draggingFeedId: null, // feed being dragged between groups
   currentFeedId: null,
-  newFeedPath: "",
   // The crop tool on the View/Edit tab: a drawn area plus its options.
   cropDrawing: null, // "box" | "polygon" while drawing, else null
   cropShape: null, // the finished GeoJSON Polygon, or null
@@ -145,6 +146,7 @@ export const store = reactive({
   networkVersion: 0, // bumped when network data changes; lists recompute
   search: {
     q: "", // one box: a place name, geocoded and flown to
+    place: null, // the geocoded place of the last search, for the Places row
     officialOnly: false,
     aoiMode: "none", // search-area source: "none" | "map" | "drawn"
     cropToAoi: false, // crop a downloaded feed to the selected area

@@ -2,7 +2,7 @@
 import { computed, onMounted, watch } from "vue";
 
 import { store } from "./store.js";
-import { currentFeed, initialPanel } from "./catalogue.js";
+import { currentFeed } from "./catalogue.js";
 import { createMap } from "./map.js";
 import { editTarget } from "./network.js";
 import { refreshAfterHistory, toggleEditMode } from "./actions.js";
@@ -13,7 +13,9 @@ import { undoShortcut } from "./undo.js";
 import AgenciesPanel from "./components/AgenciesPanel.vue";
 import AppHeader from "./components/AppHeader.vue";
 import CalPanel from "./components/CalPanel.vue";
+import CommandPalette from "./components/CommandPalette.vue";
 import DataPanel from "./components/DataPanel.vue";
+import LandingPage from "./components/LandingPage.vue";
 import MapDisplayBar from "./components/MapDisplayBar.vue";
 import NavRail from "./components/NavRail.vue";
 import RoutesPanel from "./components/RoutesPanel.vue";
@@ -27,22 +29,8 @@ import Toasts from "./components/Toasts.vue";
 import AttributeTable from "./components/AttributeTable.vue";
 import BasemapControl from "./components/BasemapControl.vue";
 import MapToolbar from "./components/MapToolbar.vue";
-/* Pre-redesign panels, hosted until each port step replaces them. */
 import CropPanel from "./components/CropPanel.vue";
-import SearchPanel from "./components/SearchPanel.vue";
 import StopInspector from "./components/StopInspector.vue";
-
-const PANEL_TITLES = {
-  data: "Data",
-  stops: "Stops",
-  routes: "Routes",
-  cal: "Services",
-  trips: "Trips",
-  agencies: "Agencies",
-  streets: "Street network",
-  validate: "Validate",
-  search: "Search",
-};
 
 const feed = computed(() => currentFeed(store.catalogue, store.currentFeedId));
 const feedPanel = computed(() => editTarget(store.activePanel) === "feed");
@@ -67,7 +55,13 @@ watch(
 
 // Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (or +Y) act on the session log,
 // globally; keystrokes inside form fields stay with the field.
+// Ctrl/Cmd+K toggles the palette from anywhere, fields included.
 window.addEventListener("keydown", (event) => {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    store.paletteOpen = !store.paletteOpen;
+    return;
+  }
   const kind = undoShortcut({
     key: event.key,
     ctrlKey: event.ctrlKey,
@@ -93,11 +87,6 @@ onMounted(async () => {
   });
   createMap();
   await loadCatalogue();
-  // Only on startup: later removing every feed must not move the user.
-  store.activePanel = initialPanel(store.catalogue);
-  // the decided startup panel counts as "worked in" (the watcher only
-  // sees changes made after this)
-  if (store.activePanel !== "data") store.workingPanel = store.activePanel;
   checkNetworkAvailable();
 });
 </script>
@@ -111,11 +100,6 @@ onMounted(async () => {
       :class="{ narrow: store.layout === 'inspector' }"
     >
       <!-- Ported panels render their own header. -->
-      <!-- Only the legacy search panel still borrows the generic title. -->
-      <div v-if="store.activePanel === 'search'" class="panel-title">
-        {{ PANEL_TITLES[store.activePanel] }}
-      </div>
-
       <div v-show="store.activePanel === 'data'">
         <DataPanel />
         <CropPanel />
@@ -134,10 +118,6 @@ onMounted(async () => {
       <StreetsPanel v-show="store.activePanel === 'streets'" />
 
       <ValidatePanel v-show="store.activePanel === 'validate'" />
-
-      <div v-show="store.activePanel === 'search'" class="legacy">
-        <SearchPanel />
-      </div>
 
       <div v-if="store.status" class="legacy">
         <div id="status">{{ store.status }}</div>
@@ -183,6 +163,8 @@ onMounted(async () => {
     </div>
   </div>
   <SessionDrawer />
+  <LandingPage />
+  <CommandPalette />
   <Toasts />
 </template>
 

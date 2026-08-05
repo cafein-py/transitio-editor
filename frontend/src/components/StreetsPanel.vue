@@ -2,12 +2,8 @@
 import { computed, ref, watch } from "vue";
 
 import {
-  acquireOsm,
-  cancelAcquire,
   loadNetwork,
   resetNetwork,
-  resolveOsmByPlace,
-  resolveOsmByView,
   saveNetwork,
   toggleNetworkEditing,
   toggleNetworkVisible,
@@ -133,7 +129,6 @@ const swatchStyle = (cls) => {
   return entry || { color: "#9aa0a8", width: 1.5, dash: null };
 };
 
-const acquireOpen = ref(false);
 </script>
 
 <template>
@@ -151,43 +146,19 @@ const acquireOpen = ref(false);
       <span class="mono extract-name" :title="extractTitle">
         {{ extractName }}
       </span>
-      <button class="btn small" @click="acquireOpen = !acquireOpen">Swap</button>
+      <button
+        class="btn small"
+        title="Search a different extract"
+        @click="store.paletteOpen = true"
+      >
+        Swap
+      </button>
     </div>
 
     <p v-if="store.network.loading" class="mono note">loading network…</p>
     <div v-if="store.network.error" class="error load-error">
       {{ store.network.error }}
       <button class="btn small" @click="loadNetwork">Retry</button>
-    </div>
-
-    <!-- Transitional acquire block until the unified search absorbs it. -->
-    <div v-if="acquireOpen" class="acquire card">
-      <input
-        v-model="store.network.acquire.place"
-        placeholder="Place name…"
-        @keyup.enter="resolveOsmByPlace"
-      />
-      <div class="acquire-row">
-        <button class="btn small" @click="resolveOsmByPlace">Find place</button>
-        <button class="btn small" @click="resolveOsmByView">Use map view</button>
-      </div>
-      <p v-if="store.network.acquire.resolving" class="mono note">resolving…</p>
-      <p v-if="store.network.acquire.error" class="mono error">
-        {{ store.network.acquire.error }}
-      </p>
-      <div v-if="store.network.acquire.resolved" class="acquire-row">
-        <span class="mono note resolved-name">
-          {{ store.network.acquire.resolved.name }}
-        </span>
-        <button
-          class="btn small dark"
-          :disabled="store.network.acquire.downloading"
-          @click="acquireOsm()"
-        >
-          {{ store.network.acquire.downloading ? "Downloading…" : "Download" }}
-        </button>
-        <button class="btn small" @click="cancelAcquire">Cancel</button>
-      </div>
     </div>
 
     <button

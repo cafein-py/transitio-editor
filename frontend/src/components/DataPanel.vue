@@ -2,7 +2,6 @@
 import { computed, reactive, ref } from "vue";
 
 import {
-  addFeed,
   createGroup,
   deleteGroup,
   dropFeedInGroup,
@@ -12,13 +11,7 @@ import {
   setFeedsActive,
   toggleMergeSelected,
 } from "../actions/catalogue.js";
-import {
-  cancelLoadSession,
-  confirmLoadSession,
-  loadSession,
-  openBrowser,
-  saveSession,
-} from "../actions.js";
+import { openBrowser } from "../actions.js";
 import { setShapeColorBy } from "../actions/mapView.js";
 import { toggleNetworkVisible } from "../actions/streets.js";
 import { groupedCatalogue } from "../catalogue.js";
@@ -178,7 +171,7 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
       <button
         class="add-btn"
         title="Find and add feeds"
-        @click="store.activePanel = 'search'"
+        @click="store.paletteOpen = true"
       >
         +
       </button>
@@ -386,8 +379,7 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
 
     <button class="new-group" @click="newGroup">+ New group</button>
 
-    <!-- Merge, session and load-by-path keep their pre-redesign forms
-         until their own port steps. -->
+    <!-- Merging keeps its pre-redesign form for now. -->
     <div class="legacy">
       <details class="panel">
         <summary>Merge feeds</summary>
@@ -434,91 +426,6 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
         </form>
       </details>
 
-      <details class="panel">
-        <summary>Session file</summary>
-        <div class="add-feed">
-          <div class="dir-row">
-            <input
-              v-model="store.session.path"
-              placeholder="session file (.json)"
-            />
-            <button
-              type="button"
-              @click="
-                openBrowser(
-                  'sessionPath',
-                  'session',
-                  store.session.path.trim() || null,
-                )
-              "
-            >
-              Browse…
-            </button>
-          </div>
-          <FileBrowser target="sessionPath" />
-          <div v-if="store.session.confirm" class="crop-panel">
-            <p class="hint">
-              {{
-                store.session.confirm.reason === "osm-edits"
-                  ? "Loading this session discards your unsaved OSM network edits."
-                  : `Loading this session replaces the ${store.session.confirm.feeds}
-                     loaded feed${store.session.confirm.feeds === 1 ? "" : "s"} (and groups).`
-              }}
-            </p>
-            <div class="mode-row">
-              <button class="primary" type="button" @click="confirmLoadSession">
-                Load anyway
-              </button>
-              <button type="button" @click="cancelLoadSession">Cancel</button>
-            </div>
-          </div>
-          <div class="mode-row">
-            <button
-              type="button"
-              class="primary"
-              :disabled="!store.session.path.trim() || store.session.saving"
-              @click="saveSession"
-            >
-              {{ store.session.saving ? "Saving…" : "Save session" }}
-            </button>
-            <button
-              type="button"
-              :disabled="!store.session.path.trim() || store.session.loading"
-              @click="loadSession()"
-            >
-              {{ store.session.loading ? "Loading…" : "Load session" }}
-            </button>
-          </div>
-        </div>
-      </details>
-
-      <details class="panel">
-        <summary>Load a feed by path</summary>
-        <form class="add-feed" @submit.prevent="addFeed">
-          <div class="dir-row">
-            <input
-              v-model="store.newFeedPath"
-              placeholder="path to a GTFS feed (.zip)"
-            />
-            <button
-              type="button"
-              @click="
-                openBrowser('feedPath', 'feed', store.newFeedPath.trim() || null)
-              "
-            >
-              Browse…
-            </button>
-          </div>
-          <FileBrowser target="feedPath" />
-          <button
-            class="primary"
-            type="submit"
-            :disabled="!store.newFeedPath.trim()"
-          >
-            Load feed
-          </button>
-        </form>
-      </details>
     </div>
   </div>
 </template>

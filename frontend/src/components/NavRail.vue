@@ -74,20 +74,6 @@ const ITEMS = [
       <span>{{ item.label }}</span>
     </button>
 
-    <div class="rail-gap"></div>
-    <!-- The unified search moves into the ⌘K palette; this rail entry keeps
-         feed download reachable until the palette exists. -->
-    <button
-      class="rail-item"
-      :class="{ active: store.activePanel === 'search' }"
-      @click="store.activePanel = 'search'"
-    >
-      <svg viewBox="0 0 18 18" fill="none" stroke="currentColor">
-        <circle cx="8" cy="8" r="4.6" stroke-width="1.7" />
-        <path d="M11.5 11.5L15 15" stroke-width="1.7" stroke-linecap="round" />
-      </svg>
-      <span>Search</span>
-    </button>
   </nav>
 </template>
 
@@ -133,8 +119,5 @@ const ITEMS = [
 .rail-item.active {
   color: var(--accent);
   background: var(--accent-tint);
-}
-.rail-gap {
-  flex: 1;
 }
 </style>

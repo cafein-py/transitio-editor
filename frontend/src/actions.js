@@ -21,8 +21,6 @@ import {
 } from "./session.js";
 import { resetForms, store } from "./store.js";
 
-export { startAoiDraw, clearAoi } from "./map.js";
-
 export function wrap(action) {
   return async (...args) => {
     try {
@@ -174,38 +172,9 @@ export function resetFeedScopedState() {
   mapBridge.clearHighlight();
 }
 
-// Saving and restoring sessions. The view snapshot and the restore
-// decision table are pure (sessions.js); these actions do the IO and
-// call the map bridge.
-export async function saveSession() {
-  const session = store.session;
-  const path = session.path.trim();
-  if (!path || session.saving) return;
-  session.saving = true;
-  try {
-    const base = path.split(/[\\/]/).pop(); // both separator styles
-    // derive .json only for an extensionless name (a leading or trailing
-    // dot is not an extension); a wrong real extension is the server's
-    // 422 to give, not something to silently double up
-    const hasExtension = /[^./\\]\.[^.]+$/.test(base);
-    const target = hasExtension ? path : `${path.replace(/\.$/, "")}.json`;
-    const body = await api("POST", "/api/session/save", {
-      path: target,
-      view: {
-        ...sessionView(store, mapBridge.getCamera()),
-        ...(store.session.wsName ? { ws_name: store.session.wsName } : {}),
-        log: sessionLogForSave(),
-      },
-    });
-    session.path = body.path;
-    store.status = saveSessionStatus(body);
-  } catch (error) {
-    store.status = error.message;
-  } finally {
-    session.saving = false;
-  }
-}
-
+// Restoring sessions. The view snapshot and the restore decision
+// table are pure (sessions.js); the actions do the IO and call the map
+// bridge. Saving goes through actions/workspace.js (the header).
 function applySessionView(view) {
   const plan = sessionRestorePlan(view || {});
   if (plan.basemap) mapBridge.setBasemap(plan.basemap);
@@ -336,46 +305,6 @@ export async function refreshAfterHistory() {
   closeInspector(); // its stop may no longer exist or match
 }
 
-export async function runSearch() {
-  const s = store.search;
-  s.searching = true;
-  s.selected = []; // old selections must not survive into new results
-  s.searched = true;
-  try {
-    const params = new URLSearchParams();
-    const q = s.q.trim();
-    let areaHint = "";
-    if (q) {
-      params.set("q", q); // a typed place decides the area
-    } else {
-      const bbox = searchAoiBbox();
-      if (bbox) params.set("bbox", bbox.join(","));
-      // Don't silently drop a requested area filter.
-      if (s.aoiMode !== "none" && !bbox) {
-        areaHint = "no area available — searched everywhere";
-      }
-    }
-    if (s.officialOnly) params.set("official", "true");
-    params.set("limit", String(s.limit));
-    const body = await api("GET", `/api/search?${params.toString()}`);
-    s.results = body.feeds;
-    s.csvFallback = body.csv_fallback;
-    if (body.place) {
-      // the search meant a place: show it
-      mapBridge.fitBbox(body.place.bbox);
-      store.status = `showing ${body.place.query}`;
-    } else {
-      store.status = areaHint;
-    }
-  } catch (error) {
-    s.results = [];
-    s.searched = false; // an error is not "no feeds found"
-    store.status = error.message;
-  } finally {
-    s.searching = false;
-  }
-}
-
 // The bbox the Search tab's area selector points at, or null.
 function searchAoiBbox() {
   if (store.search.aoiMode === "map") return mapBridge.getViewportBbox();
@@ -474,7 +403,6 @@ export function closeBrowser() {
 function applyBrowseChoice(value) {
   const { target } = store.browse;
   if (target === "downloadDir") store.search.downloadDir = value;
-  else if (target === "feedPath") store.newFeedPath = value;
   else if (target === "mergeDir") store.merge.directory = value;
   else if (target === "sessionPath") store.session.path = value;
   closeBrowser(); // a pending listing must not reopen it over the choice

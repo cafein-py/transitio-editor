@@ -23,18 +23,6 @@ export function feedModes(modes) {
   return MODES.filter((mode) => modes.includes(mode.code));
 }
 
-// Whether an entry holds an actual feed: a launch without one still
-// registers an empty builder to build a feed from scratch on.
-function hasFeedContent(feed) {
-  return Boolean(feed.source) || Object.keys(feed.tables || {}).length > 0;
-}
-
-// The panel to open on startup: with a feed loaded the editor starts on the
-// data; with nothing to show it starts where feeds are found.
-export function initialPanel(catalogue) {
-  return (catalogue || []).some(hasFeedContent) ? "data" : "search";
-}
-
 // The catalogue as display sections: one per known group in order,
 // then the ungrouped feeds. Empty groups are kept — they are drop
 // targets, and a group outlives its last member.

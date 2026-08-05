@@ -164,18 +164,19 @@ export async function dropFeedInGroup(group) {
   await dropQueue;
 }
 
-export async function addFeed() {
-  const path = store.newFeedPath.trim();
-  if (!path) return;
+export async function addFeed(rawPath) {
+  const path = (rawPath || "").trim();
+  if (!path) return false;
   try {
     await api("POST", "/api/catalogue", { path });
-    store.newFeedPath = "";
     logPlain("Feed loaded", path.split(/[\\/]/).pop());
     await loadCatalogue();
     await mapBridge.refreshAll(true);
     store.status = "";
+    return true;
   } catch (error) {
     store.status = error.message;
+    return false;
   }
 }
 
