@@ -31,6 +31,10 @@ export async function addAgency({ agencyId, name, url, timezone }) {
     pushToast({ title: "turn on editing first" });
     return false;
   }
+  if (store.historyBusy) {
+    pushToast({ title: "an undo is still running" });
+    return false;
+  }
   const missing = [
     !(agencyId || "").trim() && "agency_id",
     !(name || "").trim() && "name",

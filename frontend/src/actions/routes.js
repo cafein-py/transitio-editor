@@ -59,6 +59,10 @@ export async function selectRoute(routeId, { toggle = true } = {}) {
     return [];
   }
   const feedId = store.currentFeedId;
+  // sampled before the request: a response that lands after an edit
+  // must not claim the newer generation
+  const dataVersion = store.dataVersion;
+  const workspaceVersion = store.workspaceVersion;
   store.selectedRouteId = routeId;
   shapeCache = emptyCache();
   // clear the old halo now: a failed fetch must not leave the previous
@@ -76,13 +80,7 @@ export async function selectRoute(routeId, { toggle = true } = {}) {
         body.trips.map((trip) => trip.shape_id).filter((id) => id),
       ),
     ];
-    shapeCache = {
-      routeId,
-      feedId,
-      shapeIds,
-      dataVersion: store.dataVersion,
-      workspaceVersion: store.workspaceVersion,
-    };
+    shapeCache = { routeId, feedId, shapeIds, dataVersion, workspaceVersion };
     mapBridge.setSelectedShapes(shapeIds, feedId);
     return shapeIds;
   } catch (error) {
@@ -137,6 +135,10 @@ export async function agencyOptions() {
 export async function addRoute({ routeId, shortName, routeType, agencyId }) {
   if (!store.editMode) {
     pushToast({ title: "turn on editing first" });
+    return false;
+  }
+  if (store.historyBusy) {
+    pushToast({ title: "an undo is still running" });
     return false;
   }
   const feedId = store.currentFeedId;

@@ -21,6 +21,10 @@ export async function applyStopEdits({ stopId, name, latLon }) {
     pushToast({ title: "turn on editing first" });
     return false;
   }
+  if (store.historyBusy) {
+    pushToast({ title: "an undo is still running" });
+    return false;
+  }
   const feedId = store.currentFeedId;
   const body = { stop_name: name };
   if (latLon) {

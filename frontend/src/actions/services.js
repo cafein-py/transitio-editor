@@ -27,6 +27,10 @@ export async function addService({ serviceId, days, from, to }) {
     pushToast({ title: "turn on editing first" });
     return false;
   }
+  if (store.historyBusy) {
+    pushToast({ title: "an undo is still running" });
+    return false;
+  }
   const id = (serviceId || "").trim();
   if (!id) {
     pushToast({ title: "give the service an id first" });

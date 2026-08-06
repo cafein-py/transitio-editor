@@ -198,7 +198,7 @@ export async function addFeed(rawPath) {
 }
 
 export async function setCurrentFeed(feed) {
-  if (store.validating || store.saving || writesPending()) {
+  if (store.validating || store.saving || store.historyBusy || writesPending()) {
     // Mutating endpoints act on the backend's current feed; switching
     // while any of them is still in flight could redirect it.
     store.status = store.validating

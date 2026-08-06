@@ -98,6 +98,10 @@ export async function generateFrequency({ tripId, serviceId, start, end, headway
     pushToast({ title: "turn on editing first" });
     return false;
   }
+  if (store.historyBusy) {
+    pushToast({ title: "an undo is still running" });
+    return false;
+  }
   const feedId = store.currentFeedId;
   const routeId = store.timetableRoute;
   const { offsets, shapeId } = await templateOffsets();
@@ -137,6 +141,10 @@ export async function generateFrequency({ tripId, serviceId, start, end, headway
 export async function addSingleTrip({ tripId, serviceId, shapeId, start }) {
   if (!store.editMode) {
     pushToast({ title: "turn on editing first" });
+    return false;
+  }
+  if (store.historyBusy) {
+    pushToast({ title: "an undo is still running" });
     return false;
   }
   const feedId = store.currentFeedId;

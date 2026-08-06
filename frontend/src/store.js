@@ -109,6 +109,7 @@ export const store = reactive({
   reports: {}, // feed_id → report, the workspace-wide roll-up
   staleReportFeeds: {}, // feed_id → true when edited after its report
   validating: false, // a workspace validation sweep is running
+  historyBusy: false, // an undo/redo is committing on the backend
   reportStale: false, // edits happened after the last validation
   highlightActive: false,
   feedVisible: true, // GTFS layer group visibility toggle

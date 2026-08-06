@@ -560,10 +560,10 @@ export async function downloadSelected() {
 }
 
 export async function saveFeed() {
-  if (store.validating) {
-    // The sweep repoints the backend's current feed; the save endpoint
-    // is current-feed-only and would write the wrong feed.
-    store.status = "validation is running — try again in a moment";
+  if (store.validating || store.historyBusy) {
+    // The sweep repoints the backend's current feed and an undo is
+    // mid-commit; the save endpoint is current-feed-only.
+    store.status = "busy — try again in a moment";
     return;
   }
   // The save targets the feed that was current when it started; the

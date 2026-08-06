@@ -6,7 +6,7 @@
 //             which have no server history)
 //   local   — a snapshot of store keys restores it client-side
 //   none    — logged for the record, not undoable (says so when tried)
-import { api } from "./api.js";
+import { api, writesPending } from "./api.js";
 import { store } from "./store.js";
 import { pushToast } from "./toasts.js";
 
@@ -16,7 +16,6 @@ export const LOG_LIMIT = 300;
 export const NETWORK_FEED = "__network__";
 
 let seq = 1;
-let busy = false;
 
 // Injected by App.vue so this module never imports actions.js: refresh
 // re-reads server state into the open views after a server/request
@@ -132,7 +131,7 @@ async function applyEntry(entry, direction) {
 
 async function step(from, to, direction, verb) {
   const entry = from[from.length - 1];
-  if (!entry || busy) return;
+  if (!entry || store.historyBusy) return;
   if (store.validating) {
     // The sweep lets the backend current feed roam; feed-pinned undo
     // would race it.
@@ -143,12 +142,21 @@ async function step(from, to, direction, verb) {
     pushToast({ title: `cannot ${direction}`, body: `${entry.title} cannot be ${verb}` });
     return;
   }
-  busy = true;
+  if (writesPending()) {
+    // /api/undo reverts the backend's newest entry; an edit still
+    // committing would be that entry, not the one shown here.
+    pushToast({
+      title: `cannot ${direction} yet`,
+      body: "an edit is still saving",
+    });
+    return;
+  }
+  store.historyBusy = true;
   try {
     await applyEntry(entry, direction);
   } catch (error) {
     pushToast({ title: `${direction} failed`, body: error.message });
-    busy = false;
+    store.historyBusy = false;
     return;
   }
   // Committed: the stacks move NOW, so a refresh hiccup can't read as
@@ -174,7 +182,7 @@ async function step(from, to, direction, verb) {
   } catch (error) {
     pushToast({ title, body: `refresh failed: ${error.message}` });
   } finally {
-    busy = false;
+    store.historyBusy = false;
   }
 }
 
