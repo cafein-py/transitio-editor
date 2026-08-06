@@ -44,7 +44,7 @@ onMounted(async () => {
 // services arrive), so the old feed's draft can never be submitted
 // against the new one, then reloads and re-prefills the dates.
 watch(
-  () => store.currentFeedId,
+  () => [store.currentFeedId, store.workspaceVersion],
   async () => {
     store.services = [];
     resetForm();

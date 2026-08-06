@@ -124,10 +124,6 @@
 .legacy .dir-browser .dir-list button:hover {
   background: #f0eee9;
 }
-.legacy .dir-browser .dir-list .feed-entry {
-  color: #35507a;
-  font-weight: 600;
-}
 /* Map overlays and the attribute drawer (outside the aside). */
 .map-toolbar {
   display: flex;

@@ -53,6 +53,10 @@ export const store = reactive({
   // The panel the user last worked in, excluding the Data panel — what a
   // saved workspace reopens.
   workingPanel: null,
+  // Bumped on every workspace restore: panels keyed on currentFeedId
+  // would otherwise keep drafts when the new workspace happens to have
+  // the same current feed id.
+  workspaceVersion: 0,
   session: {
     wsName: "", // workspace name, set by the save dialog
     named: false, // once named, Save workspace saves without asking
@@ -72,8 +76,8 @@ export const store = reactive({
     directory: "", // optional folder to write the merged feed into
     merging: false,
   },
-  // The server-side file browser, shared by every path box: `target` names
-  // the field the choice lands in, `mode` whether a feed file can be picked.
+  // The server-side folder browser behind the path boxes; `target` names
+  // the field the chosen folder lands in.
   browse: {
     open: false,
     target: null, // "downloadDir" | "mergeDir"
@@ -162,18 +166,3 @@ export const store = reactive({
   },
   status: "",
 });
-
-// Panel forms hold their own local state since the redesign; this stays
-// as the (now empty) reset hook until the last legacy form is gone.
-const defaultForms = () => ({});
-
-export const forms = reactive(defaultForms());
-
-// Form drafts reference feed-scoped ids; reset them to defaults when the
-// edit target changes so stale ids can't be submitted to another feed.
-export function resetForms() {
-  const defaults = defaultForms();
-  for (const key of Object.keys(defaults)) {
-    Object.assign(forms[key], defaults[key]);
-  }
-}

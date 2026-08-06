@@ -27,7 +27,7 @@ import {
   sessionLogForSave,
   sessionRevision,
 } from "./session.js";
-import { resetForms, store } from "./store.js";
+import { store } from "./store.js";
 import { DEFAULT_HIDDEN_CLASSES } from "./streets.js";
 
 export function wrap(action) {
@@ -191,7 +191,6 @@ export function resetFeedScopedState() {
   store.saveResult = null;
   store.undoLabel = null; // the old feed's labels must not stay actionable
   store.redoLabel = null;
-  resetForms();
   mapBridge.clearHighlight();
 }
 
@@ -266,6 +265,7 @@ export async function loadSession(flags = {}) {
     resetFeedScopedState();
     // Workspace-scoped state must not leak between workspaces either:
     // reports, editing, the dirty dot and the old workspace's identity.
+    store.workspaceVersion += 1; // panels drop drafts even on a same-id feed
     store.reports = {};
     store.staleReportFeeds = {};
     store.reportStale = false;

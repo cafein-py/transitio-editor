@@ -27,17 +27,21 @@ let selectSeq = 0;
 // The selected route's shapes, so a follow-up zoom does not refetch
 // them. Keyed by route so a pending/failed selection cannot hand the
 // previous route's geometry to the zoom.
-let shapeCache = { routeId: null, shapeIds: [] };
+let shapeCache = { routeId: null, feedId: null, shapeIds: [] };
 
 export async function selectRoute(routeId, { toggle = true } = {}) {
   if (toggle && store.selectedRouteId === routeId) {
     store.selectedRouteId = null;
-    shapeCache = { routeId: null, shapeIds: [] };
+    shapeCache = { routeId: null, feedId: null, shapeIds: [] };
     mapBridge.setSelectedShapes([], null);
     return [];
   }
+  const feedId = store.currentFeedId;
   store.selectedRouteId = routeId;
-  shapeCache = { routeId: null, shapeIds: [] }; // stale until this lands
+  shapeCache = { routeId: null, feedId: null, shapeIds: [] };
+  // clear the old halo now: a failed fetch must not leave the previous
+  // route highlighted under the newly selected row
+  mapBridge.setSelectedShapes([], null);
   const seq = ++selectSeq;
   try {
     const body = await api(
@@ -50,8 +54,8 @@ export async function selectRoute(routeId, { toggle = true } = {}) {
         body.trips.map((trip) => trip.shape_id).filter((id) => id),
       ),
     ];
-    shapeCache = { routeId, shapeIds };
-    mapBridge.setSelectedShapes(shapeIds, store.currentFeedId);
+    shapeCache = { routeId, feedId, shapeIds };
+    mapBridge.setSelectedShapes(shapeIds, feedId);
     return shapeIds;
   } catch (error) {
     if (seq === selectSeq) store.status = error.message;
@@ -63,7 +67,9 @@ export async function selectRoute(routeId, { toggle = true } = {}) {
 // the map to its geometry.
 export async function zoomToRoute(routeId) {
   const shapeIds =
-    shapeCache.routeId === routeId && shapeCache.shapeIds.length
+    shapeCache.routeId === routeId &&
+    shapeCache.feedId === store.currentFeedId &&
+    shapeCache.shapeIds.length
       ? shapeCache.shapeIds
       : await selectRoute(routeId, { toggle: false });
   if (!shapeIds.length) {

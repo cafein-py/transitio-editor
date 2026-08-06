@@ -26,7 +26,7 @@ onMounted(loadAgencies);
 // The draft closes IMMEDIATELY on a feed switch — before the new feed's
 // agencies arrive — so it can never be submitted against another feed.
 watch(
-  () => store.currentFeedId,
+  () => [store.currentFeedId, store.workspaceVersion],
   async () => {
     store.agencies = [];
     resetForm();
