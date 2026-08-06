@@ -233,19 +233,30 @@ export function resolveOsmByView() {
   if (bbox) {
     resolveOsm(bbox);
   } else {
-    // A failed new request must invalidate any prior resolved extract so its
-    // Download button can't act on a stale AOI.
+    // A failed new request must invalidate any prior resolved extract AND
+    // any resolve still in flight, so the Download button can never act
+    // on a stale area.
+    invalidateResolve();
+    store.network.acquire.resolving = false;
     store.network.acquire.resolved = null;
     store.network.acquire.error = "the current map view is not a valid area";
   }
 }
 
 export function resolveOsmByDrawn() {
-  if (store.aoi) resolveOsm(store.aoi);
-  else store.network.acquire.error = "draw an area on the map first";
+  if (store.aoi) {
+    resolveOsm(store.aoi);
+    return;
+  }
+  invalidateResolve();
+  store.network.acquire.resolving = false;
+  store.network.acquire.resolved = null;
+  store.network.acquire.error = "draw an area on the map first";
 }
 
 export function cancelAcquire() {
+  invalidateResolve(); // a pending resolve must not repopulate the row
+  store.network.acquire.resolving = false;
   store.network.acquire.resolved = null;
   store.network.acquire.error = "";
 }

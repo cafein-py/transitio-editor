@@ -13,6 +13,7 @@ export function sessionView(state, camera) {
     hidden_modes: [...state.hiddenModes],
     shape_color_by: state.shapeColorBy,
     stops_visible: state.stopsVisible,
+    network_visible: state.network ? state.network.visible : undefined,
     active_tab: state.workingPanel || "data",
     // the user-given street-network name lives client-side only
     network_name:
@@ -37,6 +38,9 @@ export function sessionRestorePlan(view) {
   }
   if (typeof view.stops_visible === "boolean") {
     plan.stopsVisible = view.stops_visible;
+  }
+  if (typeof view.network_visible === "boolean") {
+    plan.networkVisible = view.network_visible;
   }
   const PANELS = [
     "data",

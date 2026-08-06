@@ -74,7 +74,15 @@ export async function selectRoute(routeId, { toggle = true } = {}) {
       "GET",
       `/api/routes/${encodeURIComponent(routeId)}/trips`,
     );
-    if (seq !== selectSeq || store.selectedRouteId !== routeId) return null;
+    if (
+      seq !== selectSeq ||
+      store.selectedRouteId !== routeId ||
+      store.currentFeedId !== feedId ||
+      store.dataVersion !== dataVersion ||
+      store.workspaceVersion !== workspaceVersion
+    ) {
+      return null; // the data moved under this request
+    }
     const shapeIds = [
       ...new Set(
         body.trips.map((trip) => trip.shape_id).filter((id) => id),

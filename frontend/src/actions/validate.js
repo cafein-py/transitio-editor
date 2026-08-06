@@ -4,7 +4,7 @@
 // endpoints in sequence, no invented backend behaviour. A dedicated
 // per-feed validate endpoint would make this one request each.
 import { resetFeedScopedState } from "../actions.js";
-import { api } from "../api.js";
+import { api, writesPending } from "../api.js";
 import * as mapBridge from "../map.js";
 import { loadCatalogue, setCurrentFeed } from "./catalogue.js";
 import { store } from "../store.js";
@@ -12,6 +12,12 @@ import { pushToast } from "../toasts.js";
 
 export async function validateWorkspace() {
   if (store.validating || !store.catalogue.length) return;
+  if (store.saving || store.historyBusy || writesPending()) {
+    // The sweep repoints the backend's current feed; it must not
+    // interleave with a save, an undo, or an in-flight edit.
+    pushToast({ title: "busy — try validating again in a moment" });
+    return;
+  }
   const original = store.currentFeedId;
   let serverCurrent = original;
   // While the backend's current feed roams, the current-feed-only

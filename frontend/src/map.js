@@ -60,10 +60,16 @@ let previewSettled = Promise.resolve(); // the latest draw/snap update
 
 // The preview after any in-flight snap lands — what Finish must save.
 export async function previewCoordsSettled() {
-  try {
-    await previewSettled;
-  } catch (error) {
-    /* the click handler already reported the snap failure */
+  // A click during the await replaces previewSettled; keep draining
+  // until the promise stops changing, so Finish saves the newest points.
+  for (let guard = 0; guard < 20; guard += 1) {
+    const pending = previewSettled;
+    try {
+      await pending;
+    } catch (error) {
+      /* the click handler already reported the snap failure */
+    }
+    if (previewSettled === pending) break;
   }
   return previewCoords;
 }

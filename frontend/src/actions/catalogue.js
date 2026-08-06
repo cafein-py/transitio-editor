@@ -314,7 +314,8 @@ export async function setFeedsActive(feeds, active) {
 }
 
 export async function removeFeed(feed) {
-  if (store.validating || store.saving) {
+  if (store.validating || store.saving || store.historyBusy || writesPending()) {
+    // Removing the current feed reassigns the backend's current feed.
     store.status = "busy — try again in a moment";
     return;
   }

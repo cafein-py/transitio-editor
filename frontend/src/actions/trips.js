@@ -218,7 +218,14 @@ export function clearPickedStops() {
 }
 
 export async function applyTripTimes() {
+  if (!store.editMode || store.historyBusy) {
+    pushToast({
+      title: store.editMode ? "an undo is still running" : "turn on editing first",
+    });
+    return;
+  }
   const feedId = store.currentFeedId;
+  const tripId = store.trip.trip_id; // pinned: the selection may change
   const updates = {};
   for (const row of store.trip.times) {
     updates[row.stop_sequence] = {
@@ -227,22 +234,26 @@ export async function applyTripTimes() {
     };
   }
   try {
-    await api(
-      "PUT",
-      `/api/trips/${encodeURIComponent(store.trip.trip_id)}/times`,
-      { times: updates },
-    );
+    await api("PUT", `/api/trips/${encodeURIComponent(tripId)}/times`, {
+      times: updates,
+    });
   } catch (error) {
     pushToast({ title: "times not applied", body: error.message });
     return;
   }
-  logServerEdit("Stop times applied", store.trip.trip_id, feedId);
-  pushToast({ title: "stop times applied", body: store.trip.trip_id });
-  await loadTripTimes(store.trip.trip_id);
+  logServerEdit("Stop times applied", tripId, feedId);
+  pushToast({ title: "stop times applied", body: tripId });
+  await loadTripTimes(tripId);
   await mapBridge.refreshSummary();
 }
 
 export async function shiftTrip() {
+  if (!store.editMode || store.historyBusy) {
+    pushToast({
+      title: store.editMode ? "an undo is still running" : "turn on editing first",
+    });
+    return;
+  }
   const feedId = store.currentFeedId;
   const tripId = store.trip.trip_id;
   try {
@@ -259,6 +270,12 @@ export async function shiftTrip() {
 }
 
 export async function deleteTrip() {
+  if (!store.editMode || store.historyBusy) {
+    pushToast({
+      title: store.editMode ? "an undo is still running" : "turn on editing first",
+    });
+    return;
+  }
   const feedId = store.currentFeedId;
   const tripId = store.trip.trip_id;
   try {

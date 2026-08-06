@@ -209,6 +209,10 @@ function applySessionView(view) {
     store.stopsVisible = plan.stopsVisible;
     mapBridge.setStopsVisible(plan.stopsVisible);
   }
+  if (plan.networkVisible !== undefined) {
+    store.network.visible = plan.networkVisible;
+    mapBridge.setNetworkVisible(plan.networkVisible);
+  }
   if (plan.activePanel) {
     store.activePanel = plan.activePanel;
     // the restored panel is now the working panel (or none, for Data)
@@ -277,6 +281,7 @@ export async function loadSession(flags = {}) {
     // view-state defaults the restored view blob does not carry
     store.feedVisible = true;
     mapBridge.setFeedVisible(true);
+    store.network.visible = true; // a hidden network must not carry over
     store.hiddenHighwayClasses.splice(
       0,
       store.hiddenHighwayClasses.length,
