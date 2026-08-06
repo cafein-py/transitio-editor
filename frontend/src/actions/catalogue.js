@@ -197,8 +197,13 @@ export async function addFeed(rawPath) {
   }
 }
 
-export async function setCurrentFeed(feed) {
-  if (store.validating || store.saving || store.historyBusy || writesPending()) {
+// `internal` is the session core switching feeds for a cross-feed undo:
+// it owns historyBusy itself and must not be refused by its own guard.
+export async function setCurrentFeed(feed, { internal = false } = {}) {
+  const blocked = internal
+    ? store.validating || store.saving
+    : store.validating || store.saving || store.historyBusy || writesPending();
+  if (blocked) {
     // Mutating endpoints act on the backend's current feed; switching
     // while any of them is still in flight could redirect it.
     store.status = store.validating

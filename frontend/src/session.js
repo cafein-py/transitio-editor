@@ -151,6 +151,7 @@ async function step(from, to, direction, verb) {
     });
     return;
   }
+  const revisionAtStart = revision;
   store.historyBusy = true;
   try {
     await applyEntry(entry, direction);
@@ -163,9 +164,14 @@ async function step(from, to, direction, verb) {
   // "the undo failed, try again" and revert a second entry. Remove the
   // entry we reverted by identity — an edit that logged during the
   // await sits on top of it and must stay.
+  const newActionDuringStep = revision !== revisionAtStart;
   const index = from.lastIndexOf(entry);
   if (index !== -1) from.splice(index, 1);
-  to.push(entry);
+  // A mutation that logged during the await cleared the redo stack; do
+  // not resurrect this entry into it and break "a new action clears redo".
+  if (direction === "redo" || to.length || !newActionDuringStep) {
+    to.push(entry);
+  }
   revision += 1; // a reversal is a data change like any other
   store.dirty = true;
   if (entry.feedId && entry.feedId !== NETWORK_FEED) {

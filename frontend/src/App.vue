@@ -82,7 +82,9 @@ onMounted(async () => {
     refresh: refreshAfterHistory,
     makeCurrent: async (feedId) => {
       const feed = store.catalogue.find((entry) => entry.feed_id === feedId);
-      if (feed && !feed.current) await setCurrentFeed(feed);
+      // `internal`: the session core owns historyBusy while it does this,
+      // so its own switch must not be refused by that guard.
+      if (feed && !feed.current) await setCurrentFeed(feed, { internal: true });
     },
   });
   createMap();

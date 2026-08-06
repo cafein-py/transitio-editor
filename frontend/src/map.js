@@ -131,13 +131,24 @@ export function flyToPoint(center, zoom = 16) {
   if (map) map.flyTo({ center, zoom: Math.max(map.getZoom(), zoom) });
 }
 
-export function fitToStops() {
-  if (!map || !lastStops || !lastStops.features.length) return;
+// Longitudes are unwrapped around the first point: a feed with stops on
+// both sides of the antimeridian would otherwise fit the whole globe.
+function fitPoints(points) {
+  if (!map || !points.length) return;
+  const [originLng] = points[0];
   const bounds = new maplibregl.LngLatBounds();
-  for (const feature of lastStops.features) {
-    bounds.extend(feature.geometry.coordinates);
+  for (const [lng, lat] of points) {
+    let unwrapped = lng;
+    while (unwrapped - originLng > 180) unwrapped -= 360;
+    while (originLng - unwrapped > 180) unwrapped += 360;
+    bounds.extend([unwrapped, lat]);
   }
   map.fitBounds(bounds, { padding: 60, maxZoom: 15 });
+}
+
+export function fitToStops() {
+  if (!lastStops) return;
+  fitPoints(lastStops.features.map((f) => f.geometry.coordinates));
 }
 
 // Fit the map to a set of shapes of one feed (a route's geometry, a
@@ -159,19 +170,7 @@ export function fitShapes(shapeIds, feedId) {
     points.push(...coords);
   }
   if (!points.length) return false;
-  // Extending bounds with raw longitudes spans the globe the wrong way
-  // for a route crossing the antimeridian (179° and -179° are adjacent,
-  // not 358° apart). Unwrap onto a continuous axis around the first
-  // point, then fit; MapLibre accepts out-of-range longitudes here.
-  const [originLng] = points[0];
-  const bounds = new maplibregl.LngLatBounds();
-  for (const [lng, lat] of points) {
-    let unwrapped = lng;
-    while (unwrapped - originLng > 180) unwrapped -= 360;
-    while (originLng - unwrapped > 180) unwrapped += 360;
-    bounds.extend([unwrapped, lat]);
-  }
-  map.fitBounds(bounds, { padding: 60, maxZoom: 15 });
+  fitPoints(points);
   return true;
 }
 
@@ -455,11 +454,7 @@ async function refreshLayers(fit) {
   // The legend offers only modes the loaded feeds actually contain.
   store.presentModes = presentModeCodes(shapes.features);
   if (fit && stops.features.length) {
-    const bounds = new maplibregl.LngLatBounds();
-    for (const feature of stops.features) {
-      bounds.extend(feature.geometry.coordinates);
-    }
-    map.fitBounds(bounds, { padding: 60, maxZoom: 15 });
+    fitPoints(stops.features.map((feature) => feature.geometry.coordinates));
   }
 }
 
@@ -492,8 +487,11 @@ export function highlightContext(context) {
   const stopIds = [];
   const shapeIds = [];
   for (const [key, value] of Object.entries(context)) {
-    if (/stopid/i.test(key)) stopIds.push(String(value));
-    if (/shapeid/i.test(key)) shapeIds.push(String(value));
+    // contexts use both `stop_id` and `stopId` spellings; compare with
+    // punctuation removed so neither is missed
+    const flat = key.replace(/[^a-z]/gi, "").toLowerCase();
+    if (flat.includes("stopid")) stopIds.push(String(value));
+    if (flat.includes("shapeid")) shapeIds.push(String(value));
   }
   setHighlight(stopIds, shapeIds);
   if (stopIds.length && lastStops) {
