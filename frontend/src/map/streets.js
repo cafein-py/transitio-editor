@@ -134,16 +134,24 @@ export function setStreetsVisible(visible) {
         store.hiddenHighwayClasses.includes(id.slice("street-".length)));
     map.setLayoutProperty(id, "visibility", hidden ? "none" : "visible");
   }
+  // Hiding the selected way's class must take its halo and vertex
+  // handles with it — the legend filters the way's full representation.
+  const selected = store.network.selected;
+  if (
+    selected &&
+    store.hiddenHighwayClasses.includes(wayClass(selected))
+  ) {
+    selectWay(null);
+  }
 }
 
 export function applyHiddenClasses() {
   setStreetsVisible(store.network.visible);
 }
 
-export function selectWay(properties) {
-  store.network.selected = properties ? { ...properties } : null;
-  store.network.vertexEdit = false;
-  renderHandles([]);
+// The halo's width follows the selected way's class; repainted on
+// selection AND whenever the way's properties change under it.
+function paintSelectionHalo(properties) {
   if (!map || !map.getLayer("street-selected")) return;
   if (!properties) {
     map.setFilter("street-selected", ["boolean", false]);
@@ -156,6 +164,13 @@ export function selectWay(properties) {
     widthExpr((entry ? entry.width : 2) + 5),
   );
   map.setFilter("street-selected", ["==", ["get", "id"], properties.id]);
+}
+
+export function selectWay(properties) {
+  store.network.selected = properties ? { ...properties } : null;
+  store.network.vertexEdit = false;
+  renderHandles([]);
+  paintSelectionHalo(properties);
 }
 
 // ---- Shape-vertex editing --------------------------------------------
@@ -202,7 +217,9 @@ export function setVertexEdit(on) {
   renderHandles(on ? handleFeatures() : []);
 }
 
-// Re-sync after the network data changed (a drag committed, an undo ran).
+// Re-sync after the network data changed (a drag committed, an undo ran):
+// the selection follows the fresh properties, so the class-dependent halo
+// repaints and a now-hidden class takes its selection with it.
 export function refreshStreets() {
   if (store.network.selected) {
     const still = waysData().find(
@@ -213,6 +230,12 @@ export function refreshStreets() {
       return;
     }
     store.network.selected = { ...still.properties };
+    const cls = wayClass(still.properties);
+    if (cls && store.hiddenHighwayClasses.includes(cls)) {
+      selectWay(null);
+      return;
+    }
+    paintSelectionHalo(still.properties);
   }
   if (store.network.vertexEdit) renderHandles(handleFeatures());
 }
@@ -223,6 +246,9 @@ let dragPosition = null;
 
 function startVertexDrag(event) {
   if (!store.network.editing || !store.network.vertexEdit) return;
+  // Vertex edits belong to the Streets panel; a leftover handle must
+  // not PATCH nodes while another panel is the map's target.
+  if (store.activePanel !== "streets") return;
   const feature = event.features && event.features[0];
   if (!feature) return;
   dragNodeId = feature.properties.id;
@@ -232,6 +258,9 @@ function startVertexDrag(event) {
   map.getCanvas().style.cursor = "grabbing";
   map.on("mousemove", onVertexDrag);
   map.once("mouseup", endVertexDrag);
+  // Releasing outside the canvas never reaches the map's mouseup; the
+  // window-level listener keeps the drag from wedging pan/cursor state.
+  window.addEventListener("mouseup", endVertexDrag, { once: true });
   event.preventDefault();
 }
 
@@ -247,7 +276,11 @@ function onVertexDrag(event) {
 }
 
 async function endVertexDrag() {
+  // Fires from whichever of the map/window listeners triggers first;
+  // remove both so the loser cannot fire on a later unrelated mouseup.
   map.off("mousemove", onVertexDrag);
+  map.off("mouseup", endVertexDrag);
+  window.removeEventListener("mouseup", endVertexDrag);
   map.dragPan.enable();
   map.getCanvas().style.cursor = "";
   const nodeId = dragNodeId;

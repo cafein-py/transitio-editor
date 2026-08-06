@@ -106,6 +106,7 @@ export const store = reactive({
   shiftSeconds: 600,
   report: null, // last validation report of the current feed
   reports: {}, // feed_id → report, the workspace-wide roll-up
+  staleReportFeeds: {}, // feed_id → true when edited after its report
   validating: false, // a workspace validation sweep is running
   reportStale: false, // edits happened after the last validation
   highlightActive: false,

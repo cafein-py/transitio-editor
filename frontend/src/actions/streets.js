@@ -3,7 +3,12 @@
 // the extract. Vertex-drag editing lives in map/streets.js.
 import { api } from "../api.js";
 import * as mapBridge from "../map.js";
-import { applyHiddenClasses, selectWay, setStreetsVisible } from "../map/streets.js";
+import {
+  applyHiddenClasses,
+  selectWay,
+  setStreetsVisible,
+  setVertexEdit,
+} from "../map/streets.js";
 import { NETWORK_FEED, logPlain, logRequestEdit } from "../session.js";
 import { store } from "../store.js";
 import { extractDisplay } from "../streets.js";
@@ -65,7 +70,8 @@ export function toggleNetworkVisible() {
 
 export function toggleNetworkEditing() {
   store.network.editing = !store.network.editing;
-  if (!store.network.editing) store.network.vertexEdit = false;
+  // Through the map bridge so the on-map vertex handles clear too.
+  if (!store.network.editing) setVertexEdit(false);
 }
 
 export function toggleHighwayClass(key) {
@@ -107,20 +113,27 @@ export async function reclassifyWay(value) {
   const path = `/api/network/ways/${selected.id}`;
   try {
     await api("PATCH", path, { tags: { highway: value } });
-    store.network.selected = { ...selected, highway: value };
+  } catch (error) {
+    store.status = error.message;
+    return;
+  }
+  // Committed: log before the fallible refresh, or a refresh hiccup
+  // would leave a real backend mutation without an entry or undo.
+  logRequestEdit(
+    "Way reclassified",
+    `way/${selected.id} highway=${value}`,
+    previous == null
+      ? null // no old value known: logged, not undoable
+      : { method: "PATCH", path, body: { tags: { highway: previous } } },
+    { method: "PATCH", path, body: { tags: { highway: value } } },
+  );
+  store.dirty = true;
+  store.network.selected = { ...selected, highway: value };
+  // the halo width follows the class
+  selectWay(store.network.selected);
+  try {
     await mapBridge.fetchNetwork();
     store.status = "";
-    store.dirty = true;
-    logRequestEdit(
-      "Way reclassified",
-      `way/${selected.id} highway=${value}`,
-      previous == null
-        ? null // no old value known: logged, not undoable
-        : { method: "PATCH", path, body: { tags: { highway: previous } } },
-      { method: "PATCH", path, body: { tags: { highway: value } } },
-    );
-    // the halo width follows the class
-    selectWay(store.network.selected);
   } catch (error) {
     store.status = error.message;
   }
@@ -134,12 +147,18 @@ export async function deleteNetworkWay() {
   }
   try {
     await api("DELETE", `/api/network/ways/${selected.id}`);
-    selectWay(null);
+  } catch (error) {
+    store.status = error.message;
+    return;
+  }
+  // A deleted way cannot be recreated with its id: logged, not undoable.
+  // Logged before the fallible refresh — the deletion has committed.
+  logPlain("Way deleted", `way/${selected.id}`, NETWORK_FEED);
+  store.dirty = true;
+  selectWay(null);
+  try {
     await mapBridge.fetchNetwork();
     store.status = "";
-    store.dirty = true;
-    // A deleted way cannot be recreated with its id: logged, not undoable.
-    logPlain("Way deleted", `way/${selected.id}`, NETWORK_FEED);
   } catch (error) {
     store.status = error.message;
   }
@@ -160,10 +179,16 @@ export async function resetNetwork() {
   if (!window.confirm("Discard all street-network edits?")) return;
   try {
     await api("POST", "/api/network/reset");
-    selectWay(null);
+  } catch (error) {
+    store.status = error.message;
+    return;
+  }
+  // Committed: log before the fallible refresh.
+  logPlain("Network edits discarded", "", NETWORK_FEED);
+  pushToast({ title: "network edits discarded" });
+  selectWay(null);
+  try {
     await mapBridge.fetchNetwork();
-    logPlain("Network edits discarded", "", NETWORK_FEED);
-    pushToast({ title: "network edits discarded" });
   } catch (error) {
     store.status = error.message;
   }
@@ -225,11 +250,22 @@ export function cancelAcquire() {
   store.network.acquire.error = "";
 }
 
+// Acquisitions have their own generation: a download begun before a
+// session restore must not install its result into the restored
+// workspace (the backend swap has already happened server-side, so a
+// stale completion re-syncs availability instead of applying itself).
+let acquireSeq = 0;
+
+export function invalidateAcquire() {
+  acquireSeq += 1;
+}
+
 export async function acquireOsm(discardEdits = false) {
   const net = store.network;
   const acquire = net.acquire;
   const resolved = acquire.resolved;
   if (!resolved || acquire.downloading) return;
+  const seq = ++acquireSeq;
   acquire.downloading = true;
   acquire.error = "";
   try {
@@ -238,8 +274,28 @@ export async function acquireOsm(discardEdits = false) {
       url: resolved.url,
       discard_edits: discardEdits,
     });
+    if (seq !== acquireSeq) {
+      // A restore replaced the workspace mid-download. The backend has
+      // already swapped to the downloaded extract (a true prevention
+      // needs a backend-side abort); re-derive the client view from it
+      // and say plainly what happened.
+      acquire.downloading = false;
+      store.network.loaded = false;
+      logPlain("Extract replaced by an earlier download", downloaded.path.split("/").pop(), NETWORK_FEED);
+      pushToast({
+        title: "a download from the previous workspace finished",
+        body: "it replaced the street network — swap again if unwanted",
+      });
+      await checkNetworkAvailable();
+      return;
+    }
     net.source = downloaded.path;
   } catch (error) {
+    if (seq !== acquireSeq) {
+      // a stale failed download has nothing to report to the new workspace
+      acquire.downloading = false;
+      return;
+    }
     // 409 on submitted-but-unsaved edits: confirm discarding, then retry once.
     if (
       error.status === 409 &&
@@ -268,6 +324,8 @@ export async function acquireOsm(discardEdits = false) {
   net.bbox = resolved.bbox || null;
   selectWay(null);
   net.error = "";
+  // The backend swap has committed: log it before the fallible render.
+  logPlain("Extract swapped", resolved.name, NETWORK_FEED);
   try {
     await mapBridge.mapReady;
     await mapBridge.fetchNetwork();
@@ -275,7 +333,6 @@ export async function acquireOsm(discardEdits = false) {
     setStreetsVisible(net.visible);
     mapBridge.fitBbox(resolved.bbox);
     await mapBridge.refreshSummary(); // snapping is now available
-    logPlain("Extract swapped", resolved.name, NETWORK_FEED);
     pushToast({ title: "loaded OSM extract", body: resolved.name });
   } catch (error) {
     net.error = error.message;

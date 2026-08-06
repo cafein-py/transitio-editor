@@ -47,11 +47,25 @@ export function logAction(entry) {
   store.session.redoStack.length = 0;
   store.dirty = true;
   store.reportStale = true;
+  const logged = log[log.length - 1];
+  if (logged.feedId && logged.feedId !== NETWORK_FEED) {
+    store.staleReportFeeds = {
+      ...store.staleReportFeeds,
+      [logged.feedId]: true,
+    };
+  }
 }
 
-// The common cases, so call sites stay one line.
-export function logServerEdit(title, detail) {
-  logAction({ kind: "server", feedId: store.currentFeedId, title, detail });
+// The common cases, so call sites stay one line. Callers snapshot the
+// feed id BEFORE their await: a feed switch during the request must not
+// pin the entry (and its undo) to the wrong feed.
+export function logServerEdit(title, detail, feedId) {
+  logAction({
+    kind: "server",
+    feedId: feedId ?? store.currentFeedId,
+    title,
+    detail,
+  });
 }
 
 export function logRequestEdit(title, detail, undoReq, redoReq, feedId = NETWORK_FEED) {
@@ -104,6 +118,12 @@ async function applyEntry(entry, direction) {
 async function step(from, to, direction, verb) {
   const entry = from[from.length - 1];
   if (!entry || busy) return;
+  if (store.validating) {
+    // The sweep lets the backend current feed roam; feed-pinned undo
+    // would race it.
+    pushToast({ title: `cannot ${direction} while validation runs` });
+    return;
+  }
   if (entry.kind === "none") {
     pushToast({ title: `cannot ${direction}`, body: `${entry.title} cannot be ${verb}` });
     return;
@@ -111,17 +131,29 @@ async function step(from, to, direction, verb) {
   busy = true;
   try {
     await applyEntry(entry, direction);
-    from.pop();
-    to.push(entry);
-    store.dirty = true;
-    if (entry.kind !== "local") await hooks.refresh();
-    pushToast({
-      title: `${direction === "undo" ? "undid" : "redid"} ${entry.title}`,
-      body: entry.detail,
-      duration: 3500,
-    });
   } catch (error) {
     pushToast({ title: `${direction} failed`, body: error.message });
+    busy = false;
+    return;
+  }
+  // Committed: the stacks move NOW, so a refresh hiccup can't read as
+  // "the undo failed, try again" and revert a second entry.
+  from.pop();
+  to.push(entry);
+  store.dirty = true;
+  if (entry.feedId && entry.feedId !== NETWORK_FEED) {
+    store.staleReportFeeds = {
+      ...store.staleReportFeeds,
+      [entry.feedId]: true,
+    };
+    store.reportStale = true;
+  }
+  const title = `${direction === "undo" ? "undid" : "redid"} ${entry.title}`;
+  try {
+    if (entry.kind !== "local") await hooks.refresh();
+    pushToast({ title, body: entry.detail, duration: 3500 });
+  } catch (error) {
+    pushToast({ title, body: `refresh failed: ${error.message}` });
   } finally {
     busy = false;
   }

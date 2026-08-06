@@ -10,6 +10,7 @@ import {
   loadTripTimes,
   pickTimetableRoute,
   shiftTrip,
+  stopStopPicking,
 } from "../actions/trips.js";
 import { currentFeed } from "../catalogue.js";
 import { stopsData } from "../entities.js";
@@ -71,6 +72,15 @@ async function generate() {
 // Timetable.
 const formOpen = ref(false);
 const q = ref("");
+
+// Stop picking is only meaningful while the new-trip form is open on
+// this panel; closing either disarms it.
+watch(
+  () => [store.activePanel, formOpen.value],
+  ([panel, open]) => {
+    if (panel !== "trips" || !open) stopStopPicking();
+  },
+);
 const shownTrips = computed(() =>
   store.routeTrips.filter((trip) => tripMatches(trip, q.value)),
 );

@@ -36,6 +36,10 @@ const items = computed(() => {
         const [lon, lat] = f.geometry.coordinates;
         return lon >= minx && lon <= maxx && lat >= miny && lat <= maxy;
       });
+    } else {
+      // no single WGS84 bbox for this view (antimeridian / whole world):
+      // an empty list is honest, "everything" is not
+      features = [];
     }
   }
   return features.map((f) => ({

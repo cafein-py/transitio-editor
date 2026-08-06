@@ -16,6 +16,7 @@ import {
 } from "./map/streets.js";
 import { logServerEdit } from "./session.js";
 import { SNAP_FILTERS, store } from "./store.js";
+import { wayHighway } from "./streets.js";
 import { cropShapeFromRing } from "./catalogue.js";
 import { editTarget } from "./network.js";
 import {
@@ -351,33 +352,52 @@ let summarySeq = 0; // a pre-restore summary must not paint over a newer one
 
 async function refreshSummary() {
   const seq = ++summarySeq;
-  const summary = await api("GET", "/api/feed");
-  if (seq !== summarySeq) return;
-  store.source = summary.source;
-  store.tables = summary.tables;
-  store.currentFeedId = summary.currentFeedId ?? null;
-  store.snapAvailable = Boolean(summary.snapAvailable);
-  store.undoLabel = summary.undo ?? null;
-  store.redoLabel = summary.redo ?? null;
-  // Keep the current feed's catalogue counts in step with its table sizes
-  // so the Catalogue tab doesn't show stale counts after a mutation.
-  const entry = store.catalogue.find((f) => f.feed_id === store.currentFeedId);
-  if (entry) entry.tables = summary.tables;
-  // Re-fetch the catalogue so derived per-feed info (mode chips) follows
-  // edits like adding a route with a new transport type.
-  try {
-    const catalogue = await api("GET", "/api/catalogue");
+  // The summary and the catalogue are two samples of the same backend
+  // state; a feed switch between them would blend two feeds' fields.
+  // Retry once on mismatch; if still unstable, discard the per-feed
+  // summary fields rather than show one feed's tables under another's id.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const summary = await api("GET", "/api/feed");
     if (seq !== summarySeq) return;
-    store.catalogue = catalogue.feeds;
-    if (catalogue.current !== store.currentFeedId) {
-      // the current feed changed between the two samples: the labels
-      // above belong to the OLD feed and must not stay actionable
+    let catalogue = null;
+    try {
+      catalogue = await api("GET", "/api/catalogue");
+    } catch (error) {
+      /* catalogue refresh is best-effort */
+    }
+    if (seq !== summarySeq) return;
+    const summaryFeed = summary.currentFeedId ?? null;
+    if (catalogue && catalogue.current !== summaryFeed) {
+      if (attempt === 0) continue; // resample: the two disagreed
+      // still unstable: trust the catalogue's current feed, drop the
+      // summary-derived per-feed fields instead of misattributing them
+      store.catalogue = catalogue.feeds;
+      store.currentFeedId = catalogue.current;
+      store.source = null;
+      store.tables = {};
       store.undoLabel = null;
       store.redoLabel = null;
+      store.snapAvailable = Boolean(summary.snapAvailable);
+      return;
     }
-    store.currentFeedId = catalogue.current;
-  } catch (error) {
-    /* summary already updated; catalogue refresh is best-effort */
+    store.source = summary.source;
+    store.tables = summary.tables;
+    store.currentFeedId = summaryFeed;
+    store.snapAvailable = Boolean(summary.snapAvailable);
+    store.undoLabel = summary.undo ?? null;
+    store.redoLabel = summary.redo ?? null;
+    if (catalogue) {
+      store.catalogue = catalogue.feeds;
+      store.currentFeedId = catalogue.current;
+    } else {
+      // keep the current feed's catalogue counts in step with its
+      // table sizes when the catalogue re-fetch was unavailable
+      const entry = store.catalogue.find(
+        (f) => f.feed_id === store.currentFeedId,
+      );
+      if (entry) entry.tables = summary.tables;
+    }
+    return;
   }
 }
 export { refreshSummary };
@@ -408,9 +428,8 @@ async function refreshLayers(fit) {
 }
 
 export async function refreshAll(fit) {
-  // Every mutation path funnels through here, so the last validation
-  // report is marked stale even for unwrapped actions (map clicks).
-  if (store.report) store.reportStale = true;
+  // Pure visibility refreshes route through here too, so staleness is
+  // NOT flagged here — the session log marks it for real mutations.
   await refreshSummary();
   await refreshLayers(fit);
 }
@@ -458,14 +477,16 @@ async function handleMapClick(event) {
   // Map clicks mutate the feed (move/add stop, draw); inert while the OSM
   // network is the edit target.
   if (editTarget(store.activePanel) !== "feed") return;
+  const feedId = store.currentFeedId; // pinned before any await
   const { lng, lat } = event.lngLat;
   try {
     if (store.movingStop) {
-      await api("PATCH", `/api/stops/${encodeURIComponent(store.movingStop)}`, {
+      const movingStop = store.movingStop;
+      await api("PATCH", `/api/stops/${encodeURIComponent(movingStop)}`, {
         stop_lat: lat,
         stop_lon: lng,
       });
-      logServerEdit("Stop moved", store.movingStop);
+      logServerEdit("Stop moved", movingStop, feedId);
       store.movingStop = null;
       store.status = "";
       store.dirty = true;
@@ -482,7 +503,7 @@ async function handleMapClick(event) {
         stop_lat: lat,
         stop_lon: lng,
       });
-      logServerEdit("Stop added", stopId);
+      logServerEdit("Stop added", stopId, feedId);
       store.dirty = true;
       await refreshAll(false);
       return;
@@ -497,9 +518,17 @@ async function handleMapClick(event) {
           const request = { waypoints: [...drawnPoints] };
           const filter = SNAP_FILTERS[store.snapNetwork];
           if (filter) request.custom_filter = filter;
-          const feature = await api("POST", "/api/shapes/snap", request);
-          if (sequence !== drawSequence) return; // superseded by a newer click
-          previewCoords = feature.geometry.coordinates;
+          try {
+            const feature = await api("POST", "/api/shapes/snap", request);
+            if (sequence !== drawSequence) return; // superseded by a newer click
+            previewCoords = feature.geometry.coordinates;
+          } catch (error) {
+            if (sequence !== drawSequence) return;
+            // A failed snap must not leave the preview missing the
+            // newest point — fall back to the raw polyline and say so.
+            previewCoords = drawnPoints.map(([a, b]) => [b, a]);
+            store.status = `snapping failed — using straight lines (${error.message})`;
+          }
         } else {
           previewCoords = drawnPoints.map(([a, b]) => [b, a]);
         }
@@ -1022,7 +1051,8 @@ export function createMap() {
 
     // Releasing the drag outside the canvas never reaches the map's mouseup;
     // a window-level release then cancels the draw so it can't get stuck (the
-    // map handler nulls aoiStart first, so an in-canvas release no-ops here).
+    // map handlers null their start point first, so an in-canvas release
+    // no-ops here). Covers both the AOI box and the crop box.
     window.addEventListener("mouseup", () => {
       if (store.aoiDrawing && aoiStart) {
         aoiStart = null;
@@ -1030,6 +1060,10 @@ export function createMap() {
         map.dragPan.enable();
         setCursor("");
         renderAoi(store.aoi); // discard the in-progress box, keep the prior one
+      }
+      if (store.cropDrawing === "box" && cropBoxStart) {
+        cropBoxStart = null;
+        cancelCropDraw(); // restores dragPan/cursor, clears the drawing
       }
     });
 
@@ -1050,6 +1084,16 @@ export function createMap() {
 
 export function setNetworkData(nodes, ways) {
   if (!map || !map.getSource("network-ways")) return; // style not built yet
+  // The class layers filter on the promoted `highway` property; the JS
+  // classifiers also read the tags dict. Promote tags-only values here
+  // so the map and the list/counts classify identically.
+  for (const feature of ways.features || []) {
+    const properties = feature.properties;
+    if (properties && properties.highway == null) {
+      const value = wayHighway(properties);
+      if (value != null) properties.highway = value;
+    }
+  }
   map.getSource("network-ways").setData(ways);
   setNetworkEntities(nodes, ways);
   store.networkVersion += 1; // the Streets panel lists recompute

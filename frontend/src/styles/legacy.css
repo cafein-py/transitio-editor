@@ -35,11 +35,17 @@
 .map-toolbar button:hover {
   background: #f0eee9;
 }
-.legacy button.mode.active,
-.map-toolbar button.mode.active {
+.legacy button.mode.active {
   background: #35507a;
   color: #fff;
   border-color: #35507a;
+}
+/* The map toolbar is part of the redesign: its active state follows the
+   accent token, not the legacy blue. */
+.map-toolbar button.mode.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
 }
 .legacy button.primary {
   background: #35507a;

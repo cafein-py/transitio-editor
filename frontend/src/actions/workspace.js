@@ -29,27 +29,27 @@ export async function defaultWorkspaceDir() {
   return defaultDir;
 }
 
-export async function saveWorkspaceAs(name, dir) {
+async function persistWorkspace(path, name) {
   const session = store.session;
-  const file = workspaceFileName(name);
-  if (!file || !dir || session.saving) return false;
+  if (session.saving) return false;
+  const logLength = session.log.length;
   session.saving = true;
   try {
     const view = {
       ...sessionView(store, getCamera()),
-      ws_name: name.trim(),
+      ws_name: name,
       log: sessionLogForSave(),
     };
-    const body = await api("POST", "/api/session/save", {
-      path: `${dir.replace(/[/\\]$/, "")}/${file}`,
-      view,
-    });
-    session.wsName = name.trim();
+    const body = await api("POST", "/api/session/save", { path, view });
+    session.wsName = name;
     session.named = true;
     session.savedAt = Date.now();
-    session.dir = dir;
+    // The server's returned path is canonical; keep name/dir derived
+    // from it so later saves and the Save-as prefill agree with it.
     session.path = body.path;
-    store.dirty = false;
+    session.dir = body.path.split(/[\\/]/).slice(0, -1).join("/");
+    // an edit that landed while the save ran is NOT in this snapshot
+    if (session.log.length === logLength) store.dirty = false;
     pushToast({ title: "workspace saved", body: body.path });
     return true;
   } catch (error) {
@@ -60,9 +60,20 @@ export async function saveWorkspaceAs(name, dir) {
   }
 }
 
-// Direct save once named; false tells the caller to open the naming dialog.
+export async function saveWorkspaceAs(name, dir) {
+  const file = workspaceFileName(name);
+  if (!file || !dir) return false;
+  return persistWorkspace(`${dir.replace(/[/\\]$/, "")}/${file}`, name.trim());
+}
+
+// Direct save once named; false tells the caller to open the naming
+// dialog. A restored workspace saves to its canonical restored path —
+// never to a directory retained from a previous workspace.
 export async function saveWorkspace() {
   const session = store.session;
   if (!session.named) return false;
+  if (session.path.trim()) {
+    return persistWorkspace(session.path.trim(), session.wsName);
+  }
   return saveWorkspaceAs(session.wsName, session.dir);
 }

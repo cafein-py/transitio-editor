@@ -36,16 +36,34 @@ export function estimateTrips(start, end, headwaySeconds) {
 
 // Relative stop offsets from an existing trip's stop_times rows —
 // the template for new trips and frequency runs on the same route.
+// GTFS allows intermediate rows with blank times; those stops stay in
+// the pattern with offsets interpolated between the neighbouring known
+// times (ends clamp to the nearest known time).
 export function offsetsFromTimes(times) {
   const rows = (times || [])
     .map((row) => ({
       stopId: row.stop_id,
       at: toSeconds(row.departure_time) ?? toSeconds(row.arrival_time),
     }))
-    .filter((row) => row.stopId && row.at !== null);
-  if (!rows.length) return [];
-  const first = rows[0].at;
-  return rows.map((row) => [row.stopId, row.at - first]);
+    .filter((row) => row.stopId);
+  if (!rows.some((row) => row.at !== null)) return [];
+  const known = rows
+    .map((row, index) => ({ index, at: row.at }))
+    .filter((row) => row.at !== null);
+  const filled = rows.map((row, index) => {
+    if (row.at !== null) return row.at;
+    const before = [...known].reverse().find((k) => k.index < index);
+    const after = known.find((k) => k.index > index);
+    if (before && after) {
+      const span = after.index - before.index;
+      return Math.round(
+        before.at + ((after.at - before.at) * (index - before.index)) / span,
+      );
+    }
+    return (before || after).at;
+  });
+  const first = filled[0];
+  return rows.map((row, index) => [row.stopId, filled[index] - first]);
 }
 
 // Trip search: by id or by start time ("A_0530" or "05:3").

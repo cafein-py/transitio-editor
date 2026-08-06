@@ -1,10 +1,16 @@
 // Feature actions shared by the sidebar panels. Each mutates the store
 // and/or calls the API, then refreshes the map. `wrap` funnels errors to
 // the status line and marks the validation report stale.
-import { api } from "./api.js";
+import { api, writesPending } from "./api.js";
+import { loadAgencies } from "./actions/agencies.js";
 import { loadCatalogue } from "./actions/catalogue.js";
-import { checkNetworkAvailable, invalidateResolve } from "./actions/streets.js";
-import { loadRouteTrips } from "./actions/trips.js";
+import { loadServices } from "./actions/services.js";
+import {
+  checkNetworkAvailable,
+  invalidateAcquire,
+  invalidateResolve,
+} from "./actions/streets.js";
+import { invalidateTripLoads, loadRouteTrips } from "./actions/trips.js";
 import {
   restoreSessionStatus,
   saveSessionStatus,
@@ -16,18 +22,21 @@ import { setShapeColorBy } from "./actions/mapView.js";
 import { isDownloaded } from "./search.js";
 import {
   installRestoredLog,
+  logPlain,
   logServerEdit,
   sessionLogForSave,
 } from "./session.js";
 import { resetForms, store } from "./store.js";
+import { DEFAULT_HIDDEN_CLASSES } from "./streets.js";
 
 export function wrap(action) {
   return async (...args) => {
     try {
       await action(...args);
       store.status = "";
-      store.dirty = true;
-      if (store.report) store.reportStale = true;
+      // dirty/reportStale are NOT set here: a cancelled prompt returns
+      // normally without mutating anything. The session log (which every
+      // committed mutation reports to) sets both.
     } catch (error) {
       store.status = error.message;
     }
@@ -35,12 +44,20 @@ export function wrap(action) {
 }
 
 export function toggleEditMode() {
+  if (store.validating) {
+    // The sweep temporarily repoints the backend's current feed;
+    // arming edits meanwhile could write to the feed being validated.
+    store.status = "validation is running — try again in a moment";
+    return;
+  }
   store.editMode = !store.editMode;
   // Leaving edit mode disarms any pending map mutation (add stop, draw,
-  // move, trip-stop picking) so the read-only view really is read-only.
+  // move, trip-stop picking, a confirmed crop area) so the read-only
+  // view really is read-only.
   if (!store.editMode) {
     setMode("select");
     store.tripPicking = false;
+    mapBridge.cancelCropDraw();
   }
 }
 
@@ -115,6 +132,7 @@ export function cancelShape() {
 }
 
 export const finishShape = wrap(async () => {
+  const feedId = store.currentFeedId;
   // Wait out any in-flight snap so the newest drawn point is included.
   const coords = await mapBridge.previewCoordsSettled();
   if (coords.length < 2) {
@@ -126,7 +144,7 @@ export const finishShape = wrap(async () => {
     shape_id: shapeId,
     points: coords.map(([lon, lat]) => [lat, lon]),
   });
-  logServerEdit("Shape drawn", shapeId);
+  logServerEdit("Shape drawn", shapeId, feedId);
   cancelShape();
   await mapBridge.refreshAll(false);
 });
@@ -164,7 +182,11 @@ export function resetFeedScopedState() {
   store.agencies = [];
   mapBridge.setRouteFocus([], null); // the picked route's dimming
   store.report = null;
-  store.reportStale = false;
+  // The banner follows the retained reports: it stays up if any OTHER
+  // feed's report is stale, not just the freshly switched-to one's.
+  store.reportStale = Object.keys(store.staleReportFeeds).some(
+    (id) => store.reports[id],
+  );
   store.saveResult = null;
   store.undoLabel = null; // the old feed's labels must not stay actionable
   store.redoLabel = null;
@@ -207,24 +229,67 @@ function applySessionView(view) {
   else if (plan.fit) mapBridge.fitToStops();
 }
 
+// Resolves true only when the restore committed; a 409 confirm request
+// and every failure resolve false, so callers (the landing page) never
+// announce a restore that did not happen.
 export async function loadSession(flags = {}) {
   const session = store.session;
   const path = session.path.trim();
-  if (!path || session.loading) return;
+  if (!path || session.loading) return false;
   session.loading = true;
+  // The restore has two phases: the backend commit (can genuinely fail)
+  // and client rehydration (after the commit the backend HAS switched —
+  // a hiccup here is a partial-view problem, not a failed restore, and
+  // must not report "nothing restored" against a switched backend).
+  let body;
   try {
-    const body = await api("POST", "/api/session/restore", {
+    body = await api("POST", "/api/session/restore", {
       path,
       ...flags,
     });
+  } catch (error) {
+    const detail = error.status === 409 ? error.detail : null;
+    if (detail && typeof detail === "object") {
+      // the server names what would be lost; ask, then retry with the
+      // matching flag added (both confirms can appear in sequence)
+      session.confirm = { ...detail, flags, path };
+    } else {
+      store.status = error.message;
+    }
+    session.loading = false;
+    return false;
+  }
+  try {
     session.confirm = null;
     await mapBridge.mapReady; // layer resets below need the sources
     resetFeedScopedState();
+    // Workspace-scoped state must not leak between workspaces either:
+    // reports, editing, the dirty dot and the old workspace's identity.
+    store.reports = {};
+    store.staleReportFeeds = {};
+    store.reportStale = false;
+    store.editMode = false;
+    store.dirty = false;
+    session.wsName = "";
+    session.named = false;
+    session.savedAt = null;
+    // view-state defaults the restored view blob does not carry
+    store.feedVisible = true;
+    mapBridge.setFeedVisible(true);
+    store.hiddenHighwayClasses.splice(
+      0,
+      store.hiddenHighwayClasses.length,
+      ...DEFAULT_HIDDEN_CLASSES,
+    );
+    store.aoi = null;
+    mapBridge.cancelCropDraw();
     // the old network's layers, drafts and acquire state must not
-    // survive into the new session; bump the resolve seq so an in-flight
-    // resolve cannot repopulate it either
+    // survive into the new session; bump the sequences so in-flight
+    // resolves, downloads and trip loads cannot repopulate it either
     store.merge.selected = []; // ids from the replaced catalogue
     invalidateResolve(); // an in-flight resolve must not repopulate acquire
+    invalidateAcquire(); // an in-flight download must not install itself
+    invalidateTripLoads(); // an in-flight trip fetch must not repaint
     mapBridge.invalidateNetwork(); // an in-flight fetch must not repaint
     Object.assign(store.network.acquire, {
       place: "",
@@ -251,31 +316,36 @@ export async function loadSession(flags = {}) {
       { type: "FeatureCollection", features: [] },
     );
     await loadCatalogue();
+    // panels keyed by feed id would miss a same-id workspace swap
+    await loadServices();
+    await loadAgencies();
     await mapBridge.refreshAll(false);
     await mapBridge.refreshSummary();
     await checkNetworkAvailable();
     applySessionView(body.view);
+    // The restored file is now the workspace's canonical location:
+    // later direct saves write there, and Save-as prefills its folder.
+    store.session.dir = session.path.split(/[\\/]/).slice(0, -1).join("/");
     store.status = restoreSessionStatus(body);
   } catch (error) {
-    const detail = error.status === 409 ? error.detail : null;
-    if (detail && typeof detail === "object") {
-      // the server names what would be lost; ask, then retry with the
-      // matching flag added (both confirms can appear in sequence)
-      session.confirm = { ...detail, flags };
-    } else {
-      store.status = error.message;
-    }
+    // committed on the backend, partially hydrated here: say so and
+    // keep the workspace open rather than pretending nothing happened
+    store.status = `workspace restored — reloading the view failed: ${error.message}`;
   } finally {
     session.loading = false;
   }
+  return true;
 }
 
 export async function confirmLoadSession() {
   const confirm = store.session.confirm;
-  if (!confirm) return;
+  if (!confirm) return false;
   const flag = confirm.reason === "osm-edits" ? "discard_edits" : "replace";
   store.session.confirm = null;
-  await loadSession({ ...confirm.flags, [flag]: true });
+  // The confirmation applies to the workspace it was raised for, even
+  // if another row changed session.path meanwhile.
+  if (confirm.path) store.session.path = confirm.path;
+  return loadSession({ ...confirm.flags, [flag]: true });
 }
 
 export function cancelLoadSession() {
@@ -288,6 +358,13 @@ export function cancelLoadSession() {
 // The session core calls this via its injected refresh hook.
 export async function refreshAfterHistory() {
   await mapBridge.refreshAll(false);
+  // Undo/redo can touch any domain: groups (compensating group moves),
+  // agencies/services (their add entries), and the OSM network
+  // (compensating reclass/vertex requests) all reload alongside the map.
+  await loadCatalogue();
+  await loadServices();
+  await loadAgencies();
+  if (store.network.loaded) await mapBridge.fetchNetwork();
   if (store.tableView.open) await loadTable();
   if (store.timetableRoute) await loadRouteTrips();
   if (store.trip) {
@@ -331,11 +408,19 @@ function downloadBody(feed) {
 }
 
 export async function downloadFeed(feed) {
+  if (store.search.downloadingId || store.search.bulk.running) return;
+  if (store.validating || store.saving || writesPending()) {
+    // Downloads activate a new backend current feed; that must not
+    // interleave with the validation sweep or a running save.
+    store.status = "busy — try again in a moment";
+    return;
+  }
   const body = downloadBody(feed);
   if (!body) return;
   store.search.downloadingId = feed.id;
   try {
     await api("POST", "/api/catalogue/download", body);
+    logPlain("Feed downloaded", feed.provider || feed.id);
     await loadCatalogue();
     await mapBridge.refreshAll(true);
     // Stay on the Search tab: downloading many of an area's feeds in a row
@@ -435,7 +520,13 @@ export function setAllSelected(feeds, on) {
 // and reporting a summary; each success gets its green check as it lands.
 export async function downloadSelected() {
   const s = store.search;
-  if (s.bulk.running || !s.selected.length) return;
+  if (s.bulk.running || s.downloadingId || !s.selected.length) return;
+  if (store.validating || store.saving || writesPending()) {
+    // Downloads activate a new backend current feed; that must not
+    // interleave with the validation sweep or a running save.
+    store.status = "busy — try again in a moment";
+    return;
+  }
   const queue = s.results.filter((feed) => s.selected.includes(feed.id));
   if (!queue.length) return;
   // Snapshot the folder/crop settings once: a mid-run change to the
@@ -460,6 +551,7 @@ export async function downloadSelected() {
       s.downloadingId = feed.id;
       try {
         await api("POST", "/api/catalogue/download", body);
+        logPlain("Feed downloaded", feed.provider || feed.id);
         await loadCatalogue();
         const index = s.selected.indexOf(feed.id);
         if (index !== -1) s.selected.splice(index, 1);
@@ -483,6 +575,17 @@ export async function downloadSelected() {
 }
 
 export async function saveFeed() {
+  if (store.validating) {
+    // The sweep repoints the backend's current feed; the save endpoint
+    // is current-feed-only and would write the wrong feed.
+    store.status = "validation is running — try again in a moment";
+    return;
+  }
+  // The save targets the feed that was current when it started; the
+  // report must file under that feed even if the user switches away
+  // while the request runs.
+  const feedId = store.currentFeedId;
+  const logLength = store.session.log.length;
   store.saving = true;
   store.saveResult = null;
   try {
@@ -491,11 +594,19 @@ export async function saveFeed() {
       acc[notice.severity] = (acc[notice.severity] || 0) + 1;
       return acc;
     }, {});
-    store.report = saved.report;
-    if (store.currentFeedId) {
-      store.reports = { ...store.reports, [store.currentFeedId]: saved.report };
+    if (feedId) {
+      store.reports = { ...store.reports, [feedId]: saved.report };
     }
-    store.reportStale = false;
+    const stillCurrent = store.currentFeedId === feedId;
+    if (stillCurrent) {
+      store.report = saved.report;
+      // an edit that landed while the save ran is NOT in this report
+      if (store.session.log.length === logLength) {
+        const { [feedId]: _cleared, ...rest } = store.staleReportFeeds;
+        store.staleReportFeeds = rest;
+        store.reportStale = Object.keys(rest).some((id) => store.reports[id]);
+      }
+    }
     store.saveResult = {
       clean: saved.clean,
       message: saved.clean

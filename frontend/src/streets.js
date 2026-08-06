@@ -62,9 +62,12 @@ export function wayHighway(properties) {
   return tags && tags.highway != null ? String(tags.highway) : null;
 }
 
+// Null for non-highway ways (railway kept for snapping): they render on
+// the separate context layer, so they belong to no legend class and are
+// excluded from class counts and the way list.
 export function wayClass(properties) {
   const value = wayHighway(properties);
-  return value ? classOfHighway(value) : "service";
+  return value ? classOfHighway(value) : null;
 }
 
 // Display identity of an extract from its file path: a readable name for
@@ -121,13 +124,15 @@ export function lineLengthKm(coordinates) {
   return total;
 }
 
-// Way counts per class, for the legend rows.
+// Way counts per class, for the legend rows; non-highway ways are not
+// part of the scale and are not counted.
 export function classCounts(features) {
   const counts = Object.fromEntries(
     HIGHWAY_CLASSES.map((entry) => [entry.key, 0]),
   );
   for (const feature of features || []) {
-    counts[wayClass(feature.properties)] += 1;
+    const cls = wayClass(feature.properties);
+    if (cls) counts[cls] += 1;
   }
   return counts;
 }

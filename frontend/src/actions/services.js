@@ -23,6 +23,10 @@ export async function loadServices() {
 }
 
 export async function addService({ serviceId, days, from, to }) {
+  if (!store.editMode) {
+    pushToast({ title: "turn on editing first" });
+    return false;
+  }
   const id = (serviceId || "").trim();
   if (!id) {
     pushToast({ title: "give the service an id first" });
@@ -33,6 +37,7 @@ export async function addService({ serviceId, days, from, to }) {
     pushToast({ title: "pick at least one day" });
     return false;
   }
+  const feedId = store.currentFeedId;
   try {
     await api("POST", "/api/services", {
       service_id: id,
@@ -44,7 +49,7 @@ export async function addService({ serviceId, days, from, to }) {
     pushToast({ title: "service not added", body: error.message });
     return false;
   }
-  logServerEdit("Service added", id);
+  logServerEdit("Service added", id, feedId);
   pushToast({ title: "service added", body: id });
   await loadServices();
   await mapBridge.refreshSummary();

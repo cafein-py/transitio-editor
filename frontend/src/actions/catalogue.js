@@ -1,7 +1,7 @@
 // Catalogue-domain actions: the feed list, groups, drag filing, the edit
 // target, merge and crop. Structural changes log to the session; pure
 // view state (visibility, colour-by) does not.
-import { api } from "../api.js";
+import { api, writesPending } from "../api.js";
 import {
   cropRequestBody,
   cropStatus,
@@ -23,9 +23,18 @@ export async function loadCatalogue() {
   try {
     const body = await api("GET", "/api/catalogue");
     if (seq !== catalogueSeq) return;
+    const previous = store.currentFeedId;
     store.catalogue = body.feeds;
     store.groups = body.groups || [];
     store.currentFeedId = body.current;
+    // Some endpoints reassign the current feed as a side effect (a
+    // download with activate, removing the current feed). The old
+    // feed's selections, drafts and timetable must not stay actionable
+    // against the new edit target. (Explicit switches reset first and
+    // pre-set currentFeedId, so they don't re-enter here.)
+    if (previous !== null && body.current !== previous) {
+      resetFeedScopedState();
+    }
   } catch (error) {
     if (seq !== catalogueSeq) return;
     store.status = error.message;
@@ -155,6 +164,10 @@ export async function dropFeedInGroup(group) {
       await loadCatalogue();
     } catch (error) {
       store.status = error.message;
+      // rebase: drop the optimistic intent and re-read committed state,
+      // so a queued follow-up cannot log an undo to an uncommitted group
+      requested.delete(move.feed_id);
+      await loadCatalogue();
     } finally {
       if (requested.get(move.feed_id) === move.group) {
         requested.delete(move.feed_id);
@@ -167,6 +180,10 @@ export async function dropFeedInGroup(group) {
 export async function addFeed(rawPath) {
   const path = (rawPath || "").trim();
   if (!path) return false;
+  if (store.validating) {
+    store.status = "validation is running — try again in a moment";
+    return false;
+  }
   try {
     await api("POST", "/api/catalogue", { path });
     logPlain("Feed loaded", path.split(/[\\/]/).pop());
@@ -181,6 +198,14 @@ export async function addFeed(rawPath) {
 }
 
 export async function setCurrentFeed(feed) {
+  if (store.validating || store.saving || writesPending()) {
+    // Mutating endpoints act on the backend's current feed; switching
+    // while any of them is still in flight could redirect it.
+    store.status = store.validating
+      ? "validation is running — try again in a moment"
+      : "an edit is still saving — try again in a moment";
+    return false;
+  }
   try {
     const body = await api("PUT", "/api/catalogue/current", {
       feed_id: feed.feed_id,
@@ -194,16 +219,22 @@ export async function setCurrentFeed(feed) {
     }
     await loadCatalogue();
     await mapBridge.refreshSummary();
+    return true;
   } catch (error) {
     store.status = error.message;
+    return false;
   }
 }
 
-// Make a feed the edit target: visible, current, editing on.
+// Make a feed the edit target: visible, current, editing on. Editing is
+// enabled only once the feed is verifiably the current one — a failed
+// activation or switch must not arm editing on the previous target.
 export async function makeEditTarget(feed) {
-  if (!feed.active) await toggleFeedActive(feed);
-  if (!feed.current) await setCurrentFeed(feed);
+  if (!feed.active && !(await toggleFeedActive(feed))) return false;
+  if (!feed.current && !(await setCurrentFeed(feed))) return false;
+  if (store.currentFeedId !== feed.feed_id) return false;
   if (!store.editMode) toggleEditMode();
+  return true;
 }
 
 // The row pencil: make the feed the edit target, or step editing off it.
@@ -241,30 +272,47 @@ export async function toggleFeedActive(feed) {
     });
     await loadCatalogue();
     await mapBridge.refreshAll(false);
+    return true;
   } catch (error) {
     store.status = error.message;
+    return false;
   }
 }
 
 // One PATCH per feed that differs, one reload at the end (a group's eye
-// or "Show all feeds" flips many at once).
+// or "Show all feeds" flips many at once). The reload runs even when a
+// later PATCH fails: the earlier ones committed, and the UI must show
+// the backend's actual state, not the pre-attempt one.
 export async function setFeedsActive(feeds, active) {
   const changing = feeds.filter((feed) => feed.active !== active);
   if (!changing.length) return;
   try {
     for (const feed of changing) {
-      await api("PATCH", `/api/catalogue/${encodeURIComponent(feed.feed_id)}`, {
-        active,
-      });
+      try {
+        await api(
+          "PATCH",
+          `/api/catalogue/${encodeURIComponent(feed.feed_id)}`,
+          { active },
+        );
+      } catch (error) {
+        pushToast({
+          title: `could not update ${feed.name}`,
+          body: error.message,
+        });
+        break;
+      }
     }
+  } finally {
     await loadCatalogue();
     await mapBridge.refreshAll(false);
-  } catch (error) {
-    store.status = error.message;
   }
 }
 
 export async function removeFeed(feed) {
+  if (store.validating || store.saving) {
+    store.status = "busy — try again in a moment";
+    return;
+  }
   if (!window.confirm(`Remove "${feed.name}" from the workspace?`)) return;
   try {
     await api("DELETE", `/api/catalogue/${encodeURIComponent(feed.feed_id)}`);
@@ -285,6 +333,9 @@ export async function removeFeed(feed) {
 // first and confirmed here, so an accidental double-click cannot start a
 // long operation and the options can be set before it runs.
 export async function cropToShape() {
+  // The crop rewrites feeds; the read-only state must not execute it
+  // even if a stale confirm card is still on screen.
+  if (!store.editMode || store.validating) return;
   const body = cropRequestBody(store.cropShape, store.crop);
   if (!body || store.crop.running) return;
   store.crop.running = true;
@@ -313,6 +364,10 @@ export function toggleMergeSelected(feed) {
 export async function mergeSelected() {
   const merge = store.merge;
   if (merge.selected.length < 2 || merge.merging) return;
+  if (store.validating || store.saving) {
+    store.status = "busy — try again in a moment";
+    return;
+  }
   merge.merging = true;
   try {
     const directory = merge.directory.trim();

@@ -4,7 +4,7 @@
 // download machinery (single, bulk, folder, crop) keeps working.
 import { api } from "../api.js";
 import * as mapBridge from "../map.js";
-import { resolveOsm } from "./streets.js";
+import { invalidateResolve, resolveOsm } from "./streets.js";
 import { store } from "../store.js";
 
 let searchSeq = 0;
@@ -56,6 +56,12 @@ export function clearUnifiedSearch() {
   s.place = null;
   s.searched = false;
   s.selected = [];
+  // The invalidated request can no longer clear this itself.
+  s.searching = false;
+  // The OSM resolver runs its own sequence; a pending resolve from the
+  // cleared query must not repopulate the extract row.
+  invalidateResolve();
+  store.network.acquire.resolving = false;
   store.network.acquire.resolved = null;
   store.network.acquire.error = "";
 }

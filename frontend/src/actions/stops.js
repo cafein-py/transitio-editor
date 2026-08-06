@@ -17,6 +17,11 @@ export function parseLatLon(text) {
 }
 
 export async function applyStopEdits({ stopId, name, latLon }) {
+  if (!store.editMode) {
+    pushToast({ title: "turn on editing first" });
+    return false;
+  }
+  const feedId = store.currentFeedId;
   const body = { stop_name: name };
   if (latLon) {
     const parsed = parseLatLon(latLon);
@@ -36,7 +41,7 @@ export async function applyStopEdits({ stopId, name, latLon }) {
     pushToast({ title: "stop not updated", body: error.message });
     return false;
   }
-  logServerEdit("Stop updated", stopId);
+  logServerEdit("Stop updated", stopId, feedId);
   store.dirty = true;
   if (store.report) store.reportStale = true;
   await mapBridge.refreshAll(false);

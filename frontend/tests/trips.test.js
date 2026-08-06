@@ -59,6 +59,38 @@ describe("offsetsFromTimes", () => {
     ]);
     expect(offsetsFromTimes([])).toEqual([]);
   });
+
+  it("keeps blank-time stops, interpolating between known times", () => {
+    expect(
+      offsetsFromTimes([
+        { stop_id: "S1", departure_time: "05:30:00" },
+        { stop_id: "S2", departure_time: "" },
+        { stop_id: "S3", departure_time: "" },
+        { stop_id: "S4", departure_time: "05:33:00" },
+      ]),
+    ).toEqual([
+      ["S1", 0],
+      ["S2", 60],
+      ["S3", 120],
+      ["S4", 180],
+    ]);
+    // blank ends clamp to the nearest known time
+    expect(
+      offsetsFromTimes([
+        { stop_id: "S1", departure_time: "" },
+        { stop_id: "S2", departure_time: "05:30:00" },
+        { stop_id: "S3", departure_time: "" },
+      ]),
+    ).toEqual([
+      ["S1", 0],
+      ["S2", 0],
+      ["S3", 0],
+    ]);
+    // no known times at all: no usable template
+    expect(
+      offsetsFromTimes([{ stop_id: "S1", departure_time: "" }]),
+    ).toEqual([]);
+  });
 });
 
 describe("tripMatches", () => {

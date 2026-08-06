@@ -26,16 +26,21 @@ const chips = computed(() =>
 const hidden = (code) => store.hiddenModes.includes(code);
 
 // A double-click arrives as click, click, dblclick: hold the toggle
-// briefly so a solo does not first flip the chip twice.
-let clickTimer = null;
+// briefly so a solo does not first flip the chip twice. One timer per
+// chip — quick clicks on two different chips are two toggles, not a
+// double-click, and must both land.
+const clickTimers = new Map();
 
 function onChipClick(chip) {
-  clearTimeout(clickTimer);
-  clickTimer = setTimeout(() => toggleModeHidden(chip.code), 220);
+  clearTimeout(clickTimers.get(chip.code));
+  clickTimers.set(
+    chip.code,
+    setTimeout(() => toggleModeHidden(chip.code), 220),
+  );
 }
 
 function onChipDblclick(chip) {
-  clearTimeout(clickTimer);
+  clearTimeout(clickTimers.get(chip.code));
   soloMode(chip.code, chip.label);
 }
 </script>

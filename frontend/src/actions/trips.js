@@ -3,6 +3,7 @@
 // stop-time edits. New trips copy their stop pattern from one of the
 // route's existing trips when no stops are picked (there is no endpoint
 // serving a route's canonical stop sequence).
+import { setMode } from "../actions.js";
 import { api } from "../api.js";
 import * as mapBridge from "../map.js";
 import { logServerEdit, sessionUndo } from "../session.js";
@@ -50,14 +51,27 @@ export async function pickTimetableRoute(routeId) {
   await loadRouteTrips();
 }
 
+// Trip-detail loads carry their own sequence plus a feed pin: a slow
+// response must not overwrite a newer selection, and one from before a
+// feed switch must not repopulate an old feed's trip as editable.
+let tripDetailSeq = 0;
+
+export function invalidateTripLoads() {
+  tripDetailSeq += 1;
+}
+
 export async function loadTripTimes(tripId) {
+  const seq = ++tripDetailSeq;
+  const feedId = store.currentFeedId;
   try {
-    store.trip = await api(
+    const body = await api(
       "GET",
       `/api/trips/${encodeURIComponent(tripId)}/times`,
     );
+    if (seq !== tripDetailSeq || store.currentFeedId !== feedId) return;
+    store.trip = body;
   } catch (error) {
-    store.status = error.message;
+    if (seq === tripDetailSeq) store.status = error.message;
   }
 }
 
@@ -80,6 +94,12 @@ async function templateOffsets() {
 }
 
 export async function generateFrequency({ tripId, serviceId, start, end, headway }) {
+  if (!store.editMode) {
+    pushToast({ title: "turn on editing first" });
+    return false;
+  }
+  const feedId = store.currentFeedId;
+  const routeId = store.timetableRoute;
   const { offsets, shapeId } = await templateOffsets();
   if (!offsets.length) {
     pushToast({
@@ -88,9 +108,13 @@ export async function generateFrequency({ tripId, serviceId, start, end, headway
     });
     return false;
   }
+  if (store.currentFeedId !== feedId || store.timetableRoute !== routeId) {
+    pushToast({ title: "selection changed — trips not generated" });
+    return false;
+  }
   try {
     await api("POST", "/api/trips/frequency", {
-      route_id: store.timetableRoute,
+      route_id: routeId,
       service_id: serviceId,
       trip_id: tripId,
       stops: offsets,
@@ -103,14 +127,20 @@ export async function generateFrequency({ tripId, serviceId, start, end, headway
     pushToast({ title: "trips not generated", body: error.message });
     return false;
   }
-  logServerEdit("Trips generated", `${store.timetableRoute} every ${headway}s`);
-  pushToast({ title: "trips generated", body: store.timetableRoute });
+  logServerEdit("Trips generated", `${routeId} every ${headway}s`, feedId);
+  pushToast({ title: "trips generated", body: routeId });
   await loadRouteTrips();
   await mapBridge.refreshAll(false);
   return true;
 }
 
 export async function addSingleTrip({ tripId, serviceId, shapeId, start }) {
+  if (!store.editMode) {
+    pushToast({ title: "turn on editing first" });
+    return false;
+  }
+  const feedId = store.currentFeedId;
+  const routeId = store.timetableRoute;
   const base = toSeconds(start);
   if (base === null) {
     pushToast({ title: "start time must be HH:MM" });
@@ -137,9 +167,13 @@ export async function addSingleTrip({ tripId, serviceId, shapeId, start }) {
     base + offset,
     base + offset,
   ]);
+  if (store.currentFeedId !== feedId || store.timetableRoute !== routeId) {
+    pushToast({ title: "selection changed — trip not added" });
+    return false;
+  }
   try {
     await api("POST", "/api/trips", {
-      route_id: store.timetableRoute,
+      route_id: routeId,
       service_id: serviceId,
       trip_id: tripId,
       stops,
@@ -149,7 +183,7 @@ export async function addSingleTrip({ tripId, serviceId, shapeId, start }) {
     pushToast({ title: "trip not added", body: error.message });
     return false;
   }
-  logServerEdit("Trip added", tripId);
+  logServerEdit("Trip added", tripId, feedId);
   pushToast({ title: "trip added", body: tripId });
   store.tripStops.length = 0;
   store.tripPicking = false;
@@ -160,6 +194,15 @@ export async function addSingleTrip({ tripId, serviceId, shapeId, start }) {
 
 export function toggleStopPicking() {
   store.tripPicking = !store.tripPicking;
+  // An armed + Stop / + Shape tool would swallow the picking clicks as
+  // placements; picking implies plain select mode.
+  if (store.tripPicking) setMode("select");
+}
+
+// Leaving the form or the panel must never keep picking armed — a later
+// map click would silently append to an invisible draft.
+export function stopStopPicking() {
+  store.tripPicking = false;
 }
 
 export function clearPickedStops() {
@@ -167,6 +210,7 @@ export function clearPickedStops() {
 }
 
 export async function applyTripTimes() {
+  const feedId = store.currentFeedId;
   const updates = {};
   for (const row of store.trip.times) {
     updates[row.stop_sequence] = {
@@ -184,13 +228,14 @@ export async function applyTripTimes() {
     pushToast({ title: "times not applied", body: error.message });
     return;
   }
-  logServerEdit("Stop times applied", store.trip.trip_id);
+  logServerEdit("Stop times applied", store.trip.trip_id, feedId);
   pushToast({ title: "stop times applied", body: store.trip.trip_id });
   await loadTripTimes(store.trip.trip_id);
   await mapBridge.refreshSummary();
 }
 
 export async function shiftTrip() {
+  const feedId = store.currentFeedId;
   const tripId = store.trip.trip_id;
   try {
     await api("POST", `/api/trips/${encodeURIComponent(tripId)}/shift`, {
@@ -200,12 +245,13 @@ export async function shiftTrip() {
     pushToast({ title: "trip not shifted", body: error.message });
     return;
   }
-  logServerEdit("Trip shifted", `${tripId} by ${store.shiftSeconds}s`);
+  logServerEdit("Trip shifted", `${tripId} by ${store.shiftSeconds}s`, feedId);
   await loadTripTimes(tripId);
   await mapBridge.refreshSummary();
 }
 
 export async function deleteTrip() {
+  const feedId = store.currentFeedId;
   const tripId = store.trip.trip_id;
   try {
     await api("DELETE", `/api/trips/${encodeURIComponent(tripId)}`);
@@ -213,7 +259,7 @@ export async function deleteTrip() {
     pushToast({ title: "trip not deleted", body: error.message });
     return;
   }
-  logServerEdit("Trip deleted", tripId);
+  logServerEdit("Trip deleted", tripId, feedId);
   pushToast({
     title: "trip deleted",
     body: tripId,

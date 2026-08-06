@@ -31,7 +31,8 @@ const activeFeeds = computed(() =>
     <div class="actions">
       <button
         class="btn small dark"
-        :disabled="store.crop.running || !activeFeeds.length"
+        :disabled="store.crop.running || !activeFeeds.length || !store.editMode"
+        :title="store.editMode ? null : 'Turn on editing first'"
         @click="cropToShape"
       >
         {{ store.crop.running ? "Cropping…" : "Crop" }}

@@ -1,12 +1,28 @@
 // Thin fetch wrapper over the editor's JSON API. Errors carry the
 // server's `detail` message.
+
+// Writes in flight: most mutating endpoints act on the backend's
+// CURRENT feed, so a feed switch while any write runs could redirect
+// it. setCurrentFeed refuses while this is non-zero.
+let pendingWrites = 0;
+
+export function writesPending() {
+  return pendingWrites > 0;
+}
+
 export async function api(method, path, body) {
   const options = { method, headers: {} };
   if (body !== undefined) {
     options.headers["Content-Type"] = "application/json";
     options.body = JSON.stringify(body);
   }
-  const response = await fetch(path, options);
+  if (method !== "GET") pendingWrites += 1;
+  let response;
+  try {
+    response = await fetch(path, options);
+  } finally {
+    if (method !== "GET") pendingWrites -= 1;
+  }
   if (!response.ok) {
     let detail = response.statusText;
     try {

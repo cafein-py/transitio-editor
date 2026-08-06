@@ -27,6 +27,10 @@ export async function loadAgencies() {
 }
 
 export async function addAgency({ agencyId, name, url, timezone }) {
+  if (!store.editMode) {
+    pushToast({ title: "turn on editing first" });
+    return false;
+  }
   const missing = [
     !(agencyId || "").trim() && "agency_id",
     !(name || "").trim() && "name",
@@ -37,6 +41,7 @@ export async function addAgency({ agencyId, name, url, timezone }) {
     pushToast({ title: `fill in ${missing.join(", ")}` });
     return false;
   }
+  const feedId = store.currentFeedId;
   try {
     await api("POST", "/api/agencies", {
       agency_id: agencyId.trim(),
@@ -48,7 +53,7 @@ export async function addAgency({ agencyId, name, url, timezone }) {
     pushToast({ title: "agency not added", body: error.message });
     return false;
   }
-  logServerEdit("Agency added", agencyId.trim());
+  logServerEdit("Agency added", agencyId.trim(), feedId);
   pushToast({ title: "agency added", body: name.trim() });
   await loadAgencies();
   await mapBridge.refreshSummary();

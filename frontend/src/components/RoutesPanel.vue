@@ -23,6 +23,13 @@ watch(
   () => [store.currentFeedId, store.dataVersion],
   () => loadRoutes(),
 );
+// A feed switch invalidates the form's draft and its agency options.
+watch(
+  () => store.currentFeedId,
+  () => {
+    formOpen.value = false;
+  },
+);
 
 const modeOf = (code) =>
   [...MODES, UNKNOWN_MODE].find((mode) => mode.code === code) || UNKNOWN_MODE;

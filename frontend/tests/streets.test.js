@@ -39,7 +39,8 @@ describe("class detection", () => {
 
   it("classes a feature's properties", () => {
     expect(wayClass({ highway: "secondary_link" })).toBe("secondary");
-    expect(wayClass({})).toBe("service");
+    // no highway at all: context, not part of the street scale
+    expect(wayClass({})).toBeNull();
   });
 });
 
@@ -104,7 +105,8 @@ describe("classCounts", () => {
     ]);
     expect(counts.primary).toBe(2);
     expect(counts.footway).toBe(1);
-    expect(counts.service).toBe(1);
+    // the tag-less way is context, not a service road
+    expect(counts.service).toBe(0);
     expect(counts.motorway).toBe(0);
   });
 });

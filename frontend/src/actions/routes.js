@@ -66,6 +66,11 @@ export async function agencyOptions() {
 }
 
 export async function addRoute({ routeId, shortName, routeType, agencyId }) {
+  if (!store.editMode) {
+    pushToast({ title: "turn on editing first" });
+    return false;
+  }
+  const feedId = store.currentFeedId;
   try {
     await api("POST", "/api/routes", {
       route_id: routeId,
@@ -77,7 +82,7 @@ export async function addRoute({ routeId, shortName, routeType, agencyId }) {
     pushToast({ title: "route not added", body: error.message });
     return false;
   }
-  logServerEdit("Route added", routeId);
+  logServerEdit("Route added", routeId, feedId);
   store.dirty = true;
   if (store.report) store.reportStale = true;
   await loadRoutes();

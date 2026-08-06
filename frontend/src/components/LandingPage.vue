@@ -45,15 +45,25 @@ function finishOpen(name) {
 async function openWorkspace(name) {
   opening.value = name;
   store.session.path = `${recentsDir.value}/${name}`;
-  await loadSession();
+  const restored = await loadSession();
   opening.value = null;
   if (store.session.confirm) return; // the confirm block takes over
-  finishOpen(name);
+  if (restored) finishOpen(name);
+  else {
+    pushToast({
+      title: "workspace not restored",
+      body: store.status || name,
+    });
+  }
 }
 
 async function confirmOpen() {
-  await confirmLoadSession();
-  if (!store.session.confirm) finishOpen(null);
+  const restored = await confirmLoadSession();
+  if (store.session.confirm) return; // a second confirm can follow
+  if (restored) finishOpen(null);
+  else {
+    pushToast({ title: "workspace not restored", body: store.status || "" });
+  }
 }
 
 const extractName = computed(() => {

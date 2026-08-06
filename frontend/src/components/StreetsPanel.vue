@@ -11,7 +11,7 @@ import {
 import { toggleFeedVisible } from "../actions/mapView.js";
 import { waysData } from "../entities.js";
 import * as mapBridge from "../map.js";
-import { selectWay } from "../map/streets.js";
+import { selectWay, setVertexEdit } from "../map/streets.js";
 import {
   bboxLabel,
   classCounts,
@@ -24,11 +24,13 @@ import { useEntityList } from "../composables/useEntityList.js";
 import HighwayLegend from "./HighwayLegend.vue";
 import ListPager from "./ListPager.vue";
 
-// The panel retries the eager startup load (no-op once loaded).
+// The panel retries the eager startup load (no-op once loaded);
+// leaving it clears the vertex handles so no drag survives elsewhere.
 watch(
   () => store.activePanel,
   (panel) => {
     if (panel === "streets") loadNetwork();
+    else if (store.network.vertexEdit) setVertexEdit(false);
   },
 );
 
@@ -82,7 +84,10 @@ const counts = computed(() => {
 });
 
 const visibleRows = computed(() =>
-  rows.value.filter((row) => !store.hiddenHighwayClasses.includes(row.cls)),
+  rows.value.filter(
+    // non-highway ways (row.cls null) are map context, not list entries
+    (row) => row.cls && !store.hiddenHighwayClasses.includes(row.cls),
+  ),
 );
 
 const list = useEntityList({
