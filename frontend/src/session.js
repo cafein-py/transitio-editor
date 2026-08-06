@@ -33,7 +33,8 @@ export function configureSession(overrides) {
 
 // Monotonic across the session: the exact "did anything change since?"
 // token. The log's length is not one — it stops growing at LOG_LIMIT,
-// and an undo followed by a new action leaves it unchanged.
+// and an undo followed by a new action leaves it unchanged. Bumped by
+// logAction AND by a committed undo/redo (both change the data).
 let revision = 0;
 
 export function sessionRevision() {
@@ -154,6 +155,7 @@ async function step(from, to, direction, verb) {
   // "the undo failed, try again" and revert a second entry.
   from.pop();
   to.push(entry);
+  revision += 1; // a reversal is a data change like any other
   store.dirty = true;
   if (entry.feedId && entry.feedId !== NETWORK_FEED) {
     store.staleReportFeeds = {

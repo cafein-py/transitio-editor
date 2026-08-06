@@ -147,8 +147,7 @@ let lastShapes = null;
 export function fitShapes(shapeIds, feedId) {
   if (!map || !lastShapes || !shapeIds || !shapeIds.length) return false;
   const wanted = new Set(shapeIds);
-  const bounds = new maplibregl.LngLatBounds();
-  let found = false;
+  const points = [];
   for (const feature of lastShapes.features) {
     const properties = feature.properties;
     if (!wanted.has(properties.shape_id)) continue;
@@ -157,10 +156,21 @@ export function fitShapes(shapeIds, feedId) {
       feature.geometry.type === "MultiLineString"
         ? feature.geometry.coordinates.flat()
         : feature.geometry.coordinates;
-    for (const coord of coords) bounds.extend(coord);
-    found = true;
+    points.push(...coords);
   }
-  if (!found) return false;
+  if (!points.length) return false;
+  // Extending bounds with raw longitudes spans the globe the wrong way
+  // for a route crossing the antimeridian (179° and -179° are adjacent,
+  // not 358° apart). Unwrap onto a continuous axis around the first
+  // point, then fit; MapLibre accepts out-of-range longitudes here.
+  const [originLng] = points[0];
+  const bounds = new maplibregl.LngLatBounds();
+  for (const [lng, lat] of points) {
+    let unwrapped = lng;
+    while (unwrapped - originLng > 180) unwrapped -= 360;
+    while (originLng - unwrapped > 180) unwrapped += 360;
+    bounds.extend([unwrapped, lat]);
+  }
   map.fitBounds(bounds, { padding: 60, maxZoom: 15 });
   return true;
 }

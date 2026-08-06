@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import { loadRoutes, selectRoute, zoomToRoute } from "../actions/routes.js";
 import { toggleEditTarget } from "../actions/catalogue.js";
@@ -66,15 +66,28 @@ const chips = computed(() => [
 // the second click cannot deselect the route the zoom is about to use.
 let clickTimer = null;
 
-function onRowClick(routeId) {
+function cancelPendingClick() {
   clearTimeout(clickTimer);
-  clickTimer = setTimeout(() => selectRoute(routeId), 220);
+  clickTimer = null;
+}
+
+function onRowClick(routeId) {
+  const feedId = store.currentFeedId;
+  cancelPendingClick();
+  clickTimer = setTimeout(() => {
+    // a feed switch during the hold invalidates the clicked row
+    if (store.currentFeedId === feedId) selectRoute(routeId);
+  }, 220);
 }
 
 function onRowDblclick(routeId) {
-  clearTimeout(clickTimer);
+  cancelPendingClick();
   zoomToRoute(routeId);
 }
+
+// A pending click must not fire into another feed or after teardown.
+watch(() => store.currentFeedId, cancelPendingClick);
+onBeforeUnmount(cancelPendingClick);
 
 async function openForm() {
   if (!feed.value) return;

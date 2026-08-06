@@ -24,18 +24,20 @@ export async function loadRoutes() {
 // reference (one fetch; the shapes layer has no route ids of its own).
 let selectSeq = 0;
 
-// The shapes of the currently selected route, so a follow-up zoom does
-// not refetch them.
-let selectedShapeIds = [];
+// The selected route's shapes, so a follow-up zoom does not refetch
+// them. Keyed by route so a pending/failed selection cannot hand the
+// previous route's geometry to the zoom.
+let shapeCache = { routeId: null, shapeIds: [] };
 
 export async function selectRoute(routeId, { toggle = true } = {}) {
   if (toggle && store.selectedRouteId === routeId) {
     store.selectedRouteId = null;
-    selectedShapeIds = [];
+    shapeCache = { routeId: null, shapeIds: [] };
     mapBridge.setSelectedShapes([], null);
     return [];
   }
   store.selectedRouteId = routeId;
+  shapeCache = { routeId: null, shapeIds: [] }; // stale until this lands
   const seq = ++selectSeq;
   try {
     const body = await api(
@@ -48,7 +50,7 @@ export async function selectRoute(routeId, { toggle = true } = {}) {
         body.trips.map((trip) => trip.shape_id).filter((id) => id),
       ),
     ];
-    selectedShapeIds = shapeIds;
+    shapeCache = { routeId, shapeIds };
     mapBridge.setSelectedShapes(shapeIds, store.currentFeedId);
     return shapeIds;
   } catch (error) {
@@ -61,14 +63,21 @@ export async function selectRoute(routeId, { toggle = true } = {}) {
 // the map to its geometry.
 export async function zoomToRoute(routeId) {
   const shapeIds =
-    store.selectedRouteId === routeId && selectedShapeIds.length
-      ? selectedShapeIds
+    shapeCache.routeId === routeId && shapeCache.shapeIds.length
+      ? shapeCache.shapeIds
       : await selectRoute(routeId, { toggle: false });
   if (!shapeIds.length) {
     pushToast({ title: "this route has no shape to zoom to" });
     return;
   }
-  mapBridge.fitShapes(shapeIds, store.currentFeedId);
+  // The shapes may be absent from the map (hidden mode, inactive feed):
+  // say so rather than leaving the map silently unmoved.
+  if (!mapBridge.fitShapes(shapeIds, store.currentFeedId)) {
+    pushToast({
+      title: "the route's shape is not on the map",
+      body: "its mode may be hidden in the map display bar",
+    });
+  }
 }
 
 // The current feed's agencies for the form's select, via the attribute

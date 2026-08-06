@@ -582,16 +582,14 @@ export async function saveFeed() {
     if (feedId) {
       store.reports = { ...store.reports, [feedId]: saved.report };
     }
-    const stillCurrent = store.currentFeedId === feedId;
-    if (stillCurrent) {
-      store.report = saved.report;
-      // an edit that landed while the save ran is NOT in this report
-      if (sessionRevision() === revision) {
-        const { [feedId]: _cleared, ...rest } = store.staleReportFeeds;
-        store.staleReportFeeds = rest;
-        store.reportStale = Object.keys(rest).some((id) => store.reports[id]);
-      }
+    // an edit (or undo) that landed while the save ran is NOT in this
+    // report; the mark belongs to the SAVED feed, current or not.
+    if (feedId && sessionRevision() === revision) {
+      const { [feedId]: _cleared, ...rest } = store.staleReportFeeds;
+      store.staleReportFeeds = rest;
+      store.reportStale = Object.keys(rest).some((id) => store.reports[id]);
     }
+    if (store.currentFeedId === feedId) store.report = saved.report;
     store.saveResult = {
       clean: saved.clean,
       message: saved.clean
