@@ -152,8 +152,11 @@ async function step(from, to, direction, verb) {
     return;
   }
   // Committed: the stacks move NOW, so a refresh hiccup can't read as
-  // "the undo failed, try again" and revert a second entry.
-  from.pop();
+  // "the undo failed, try again" and revert a second entry. Remove the
+  // entry we reverted by identity — an edit that logged during the
+  // await sits on top of it and must stay.
+  const index = from.lastIndexOf(entry);
+  if (index !== -1) from.splice(index, 1);
   to.push(entry);
   revision += 1; // a reversal is a data change like any other
   store.dirty = true;

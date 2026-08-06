@@ -27,18 +27,40 @@ let selectSeq = 0;
 // The selected route's shapes, so a follow-up zoom does not refetch
 // them. Keyed by route so a pending/failed selection cannot hand the
 // previous route's geometry to the zoom.
-let shapeCache = { routeId: null, feedId: null, shapeIds: [] };
+let shapeCache = {
+  routeId: null,
+  feedId: null,
+  shapeIds: [],
+  // the data generations the cache was built against
+  dataVersion: -1,
+  workspaceVersion: -1,
+};
+
+const cacheIsFresh = (routeId) =>
+  shapeCache.routeId === routeId &&
+  shapeCache.feedId === store.currentFeedId &&
+  shapeCache.dataVersion === store.dataVersion &&
+  shapeCache.workspaceVersion === store.workspaceVersion &&
+  shapeCache.shapeIds.length > 0;
+
+const emptyCache = () => ({
+  routeId: null,
+  feedId: null,
+  shapeIds: [],
+  dataVersion: -1,
+  workspaceVersion: -1,
+});
 
 export async function selectRoute(routeId, { toggle = true } = {}) {
   if (toggle && store.selectedRouteId === routeId) {
     store.selectedRouteId = null;
-    shapeCache = { routeId: null, feedId: null, shapeIds: [] };
+    shapeCache = emptyCache();
     mapBridge.setSelectedShapes([], null);
     return [];
   }
   const feedId = store.currentFeedId;
   store.selectedRouteId = routeId;
-  shapeCache = { routeId: null, feedId: null, shapeIds: [] };
+  shapeCache = emptyCache();
   // clear the old halo now: a failed fetch must not leave the previous
   // route highlighted under the newly selected row
   mapBridge.setSelectedShapes([], null);
@@ -48,30 +70,40 @@ export async function selectRoute(routeId, { toggle = true } = {}) {
       "GET",
       `/api/routes/${encodeURIComponent(routeId)}/trips`,
     );
-    if (seq !== selectSeq || store.selectedRouteId !== routeId) return [];
+    if (seq !== selectSeq || store.selectedRouteId !== routeId) return null;
     const shapeIds = [
       ...new Set(
         body.trips.map((trip) => trip.shape_id).filter((id) => id),
       ),
     ];
-    shapeCache = { routeId, feedId, shapeIds };
+    shapeCache = {
+      routeId,
+      feedId,
+      shapeIds,
+      dataVersion: store.dataVersion,
+      workspaceVersion: store.workspaceVersion,
+    };
     mapBridge.setSelectedShapes(shapeIds, feedId);
     return shapeIds;
   } catch (error) {
     if (seq === selectSeq) store.status = error.message;
-    return [];
+    return null; // null = the lookup failed, [] = the route has no shape
   }
 }
 
 // Double-click on a route row: select it (never toggling it off) and fit
 // the map to its geometry.
 export async function zoomToRoute(routeId) {
-  const shapeIds =
-    shapeCache.routeId === routeId &&
-    shapeCache.feedId === store.currentFeedId &&
-    shapeCache.shapeIds.length
-      ? shapeCache.shapeIds
-      : await selectRoute(routeId, { toggle: false });
+  const shapeIds = cacheIsFresh(routeId)
+    ? shapeCache.shapeIds
+    : await selectRoute(routeId, { toggle: false });
+  if (shapeIds === null) {
+    pushToast({
+      title: "could not load the route's shape",
+      body: store.status || "",
+    });
+    return;
+  }
   if (!shapeIds.length) {
     pushToast({ title: "this route has no shape to zoom to" });
     return;
