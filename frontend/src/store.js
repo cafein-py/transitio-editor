@@ -76,13 +76,10 @@ export const store = reactive({
   // the field the choice lands in, `mode` whether a feed file can be picked.
   browse: {
     open: false,
-    target: null, // "downloadDir" | "feedPath" | "mergeDir" | "sessionPath"
-    mode: "dir", // "dir" (folder) | "feed" (.zip) | "session" (.json)
+    target: null, // "downloadDir" | "mergeDir"
     path: "",
     parent: null,
     dirs: [],
-    feeds: [],
-    sessions: [],
     error: "",
   },
   snapAvailable: false,

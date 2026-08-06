@@ -6,7 +6,7 @@
 import { setMode } from "../actions.js";
 import { api } from "../api.js";
 import * as mapBridge from "../map.js";
-import { logServerEdit, sessionUndo } from "../session.js";
+import { logServerEdit, undoEntry } from "../session.js";
 import { store } from "../store.js";
 import { pushToast } from "../toasts.js";
 import { offsetsFromTimes, toSeconds } from "../trips.js";
@@ -259,11 +259,12 @@ export async function deleteTrip() {
     pushToast({ title: "trip not deleted", body: error.message });
     return;
   }
-  logServerEdit("Trip deleted", tripId, feedId);
+  const entryId = logServerEdit("Trip deleted", tripId, feedId);
   pushToast({
     title: "trip deleted",
     body: tripId,
-    action: { label: "undo", run: sessionUndo },
+    // bound to THIS deletion: it refuses once newer edits land
+    action: { label: "undo", run: undoEntry(entryId) },
   });
   store.trip = null;
   await loadRouteTrips();

@@ -24,11 +24,16 @@ export async function loadRoutes() {
 // reference (one fetch; the shapes layer has no route ids of its own).
 let selectSeq = 0;
 
-export async function selectRoute(routeId) {
-  if (store.selectedRouteId === routeId) {
+// The shapes of the currently selected route, so a follow-up zoom does
+// not refetch them.
+let selectedShapeIds = [];
+
+export async function selectRoute(routeId, { toggle = true } = {}) {
+  if (toggle && store.selectedRouteId === routeId) {
     store.selectedRouteId = null;
+    selectedShapeIds = [];
     mapBridge.setSelectedShapes([], null);
-    return;
+    return [];
   }
   store.selectedRouteId = routeId;
   const seq = ++selectSeq;
@@ -37,16 +42,33 @@ export async function selectRoute(routeId) {
       "GET",
       `/api/routes/${encodeURIComponent(routeId)}/trips`,
     );
-    if (seq !== selectSeq || store.selectedRouteId !== routeId) return;
+    if (seq !== selectSeq || store.selectedRouteId !== routeId) return [];
     const shapeIds = [
       ...new Set(
         body.trips.map((trip) => trip.shape_id).filter((id) => id),
       ),
     ];
+    selectedShapeIds = shapeIds;
     mapBridge.setSelectedShapes(shapeIds, store.currentFeedId);
+    return shapeIds;
   } catch (error) {
     if (seq === selectSeq) store.status = error.message;
+    return [];
   }
+}
+
+// Double-click on a route row: select it (never toggling it off) and fit
+// the map to its geometry.
+export async function zoomToRoute(routeId) {
+  const shapeIds =
+    store.selectedRouteId === routeId && selectedShapeIds.length
+      ? selectedShapeIds
+      : await selectRoute(routeId, { toggle: false });
+  if (!shapeIds.length) {
+    pushToast({ title: "this route has no shape to zoom to" });
+    return;
+  }
+  mapBridge.fitShapes(shapeIds, store.currentFeedId);
 }
 
 // The current feed's agencies for the form's select, via the attribute

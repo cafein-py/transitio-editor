@@ -23,12 +23,15 @@ function resetForm() {
 }
 
 onMounted(loadAgencies);
+// The draft closes IMMEDIATELY on a feed switch — before the new feed's
+// agencies arrive — so it can never be submitted against another feed.
 watch(
   () => store.currentFeedId,
   async () => {
-    await loadAgencies();
+    store.agencies = [];
     resetForm();
     formOpen.value = false;
+    await loadAgencies();
   },
 );
 

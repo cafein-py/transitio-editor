@@ -25,6 +25,7 @@ import {
   logPlain,
   logServerEdit,
   sessionLogForSave,
+  sessionRevision,
 } from "./session.js";
 import { resetForms, store } from "./store.js";
 import { DEFAULT_HIDDEN_CLASSES } from "./streets.js";
@@ -434,20 +435,17 @@ export async function downloadFeed(feed) {
   }
 }
 
-// Server-side file browser behind every path box (a web page cannot read
-// absolute paths from a native picker; the loopback backend can). `target`
-// names the field a choice lands in, `mode` whether feeds are pickable.
-export async function openBrowser(target, mode, path) {
+// Server-side folder browser behind the path boxes (a web page cannot
+// read absolute paths from a native picker; the loopback backend can).
+// `target` names the field the chosen folder lands in.
+export async function openBrowser(target, path) {
   // Clear the old listing: entries from the previous target must not be
   // clickable under the new one while its listing is on the way.
   Object.assign(store.browse, {
     target,
-    mode,
     path: "",
     parent: null,
     dirs: [],
-    feeds: [],
-    sessions: [],
     error: "",
   });
   await browseTo(path);
@@ -469,8 +467,6 @@ export async function browseTo(path) {
       path: listing.path,
       parent: listing.parent,
       dirs: listing.dirs,
-      feeds: listing.feeds || [],
-      sessions: listing.sessions || [],
       error: "",
     });
   } catch (error) {
@@ -485,24 +481,13 @@ export function closeBrowser() {
   store.browse.open = false;
 }
 
-function applyBrowseChoice(value) {
-  const { target } = store.browse;
-  if (target === "downloadDir") store.search.downloadDir = value;
-  else if (target === "mergeDir") store.merge.directory = value;
-  else if (target === "sessionPath") store.session.path = value;
-  closeBrowser(); // a pending listing must not reopen it over the choice
-}
-
-export function chooseBrowsedSession(name) {
-  applyBrowseChoice(`${store.browse.path}/${name}`);
-}
-
+// Only folder picking remains: feeds are loaded through the unified
+// search and workspaces through the header/landing page.
 export function chooseBrowsedDir() {
-  applyBrowseChoice(store.browse.path);
-}
-
-export function chooseBrowsedFeed(name) {
-  applyBrowseChoice(`${store.browse.path}/${name}`);
+  const { target, path } = store.browse;
+  if (target === "downloadDir") store.search.downloadDir = path;
+  else if (target === "mergeDir") store.merge.directory = path;
+  closeBrowser(); // a pending listing must not reopen it over the choice
 }
 
 export function toggleFeedSelected(feedId) {
@@ -585,7 +570,7 @@ export async function saveFeed() {
   // report must file under that feed even if the user switches away
   // while the request runs.
   const feedId = store.currentFeedId;
-  const logLength = store.session.log.length;
+  const revision = sessionRevision();
   store.saving = true;
   store.saveResult = null;
   try {
@@ -601,7 +586,7 @@ export async function saveFeed() {
     if (stillCurrent) {
       store.report = saved.report;
       // an edit that landed while the save ran is NOT in this report
-      if (store.session.log.length === logLength) {
+      if (sessionRevision() === revision) {
         const { [feedId]: _cleared, ...rest } = store.staleReportFeeds;
         store.staleReportFeeds = rest;
         store.reportStale = Object.keys(rest).some((id) => store.reports[id]);

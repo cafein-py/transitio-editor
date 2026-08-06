@@ -1,8 +1,9 @@
-/* Styling for the pre-redesign panels while they are ported one by one.
-   Panel-internal rules are scoped under .legacy (the aside container the
-   old components are hosted in); map overlays and the attribute drawer
-   render outside it and keep their selectors. This file shrinks as panels
-   are rebuilt and disappears with the last of them. */
+/* Styling for the components that still predate the redesign: the
+   Data panel's merge collapsible, the server-side FileBrowser, the map
+   toolbar, the basemap control and the attribute drawer. Panel-internal
+   rules are scoped under .legacy; the map overlays and the drawer render
+   outside it and keep their own selectors. This file disappears with the
+   last of those components. */
 .legacy {
   font: 14px/1.4 var(--sans);
 }
@@ -17,10 +18,6 @@
   cursor: pointer;
   font-weight: 600;
 }
-.legacy .mode-row {
-  display: flex;
-  gap: 6px;
-}
 .legacy button,
 .table-panel button,
 .map-toolbar button {
@@ -34,11 +31,6 @@
 .table-panel button:hover,
 .map-toolbar button:hover {
   background: #f0eee9;
-}
-.legacy button.mode.active {
-  background: #35507a;
-  color: #fff;
-  border-color: #35507a;
 }
 /* The map toolbar is part of the redesign: its active state follows the
    accent token, not the legacy blue. */
@@ -73,113 +65,10 @@
   color: #666;
   font-size: 12px;
 }
-.legacy #summary table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-.legacy #summary td {
-  padding: 1px 4px;
-}
-.legacy #summary td:last-child {
-  text-align: right;
-  color: #666;
-}
 .legacy #status {
   color: #a33;
   min-height: 1.2em;
   font-size: 13px;
-}
-.legacy #inspector label {
-  display: block;
-  margin-top: 6px;
-  font-size: 12px;
-  color: #555;
-}
-.legacy input.offset {
-  width: 70px;
-}
-.legacy #notices {
-  margin-top: 8px;
-  max-height: 220px;
-  overflow-y: auto;
-  font-size: 12px;
-}
-.legacy .notice-head {
-  cursor: pointer;
-  padding: 2px 4px;
-  border-radius: 4px;
-}
-.legacy .notice-head.error {
-  color: #a33;
-}
-.legacy .notice-head.warning {
-  color: #8a6d00;
-}
-.legacy .notice-head.info {
-  color: #555;
-}
-.legacy .notice ol {
-  margin: 2px 0;
-  padding-left: 18px;
-}
-.legacy .context {
-  cursor: pointer;
-}
-.legacy .context:hover {
-  text-decoration: underline;
-}
-.legacy #trip-list {
-  list-style: none;
-  margin: 6px 0;
-  padding: 0;
-  max-height: 140px;
-  overflow-y: auto;
-  font-size: 12px;
-}
-.legacy #trip-list li {
-  cursor: pointer;
-  padding: 2px 4px;
-  border-radius: 4px;
-}
-.legacy #trip-list li:hover {
-  background: #f0eee9;
-}
-.legacy #trip-list li.selected {
-  background: #35507a;
-  color: #fff;
-}
-.legacy table.times {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-.legacy table.times th {
-  text-align: left;
-  color: #666;
-  font-weight: 500;
-}
-.legacy table.times input {
-  width: 76px;
-  padding: 3px;
-}
-.legacy .dot {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #e67e22;
-  margin-left: 4px;
-  vertical-align: middle;
-}
-.legacy .badge {
-  display: inline-block;
-  min-width: 16px;
-  padding: 0 4px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.3);
-  font-size: 11px;
-  margin-left: 4px;
 }
 .legacy .swatch {
   display: inline-block;
@@ -188,143 +77,6 @@
   border-radius: 2px;
   margin-right: 5px;
   vertical-align: middle;
-}
-.legacy .feed-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 10px;
-  font-size: 12px;
-  color: #555;
-}
-.legacy .feed-bar select {
-  flex: 1;
-  font-size: 12px;
-  padding: 4px;
-}
-.legacy .report-feed {
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-.legacy .current-feed {
-  display: flex;
-  align-items: center;
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-.legacy .catalogue-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-.legacy .catalogue-table th {
-  text-align: left;
-  color: #666;
-  font-weight: 500;
-}
-.legacy .catalogue-table td {
-  padding: 3px 4px;
-  vertical-align: middle;
-}
-.legacy .catalogue-table tr.current {
-  background: #eef1f6;
-}
-.legacy .catalogue-table .feed-name {
-  font-weight: 600;
-}
-.legacy .catalogue-table .feed-tables {
-  display: block;
-  color: #666;
-  font-size: 11px;
-}
-.legacy .catalogue-table .feed-modes {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px 8px;
-  font-size: 11px;
-  color: #555;
-}
-.legacy .catalogue-table .mode-chip {
-  white-space: nowrap;
-}
-.legacy .catalogue-table .mode-chip .swatch {
-  width: 8px;
-  height: 8px;
-  margin-right: 3px;
-}
-.legacy .catalogue-table .remove {
-  padding: 1px 7px;
-  line-height: 1;
-  color: #a33;
-}
-/* GTFS vs OSM entries: badge colors match their map layers (orange stops,
-   purple network). */
-.legacy .kind-badge {
-  display: inline-block;
-  padding: 0 4px;
-  border-radius: 3px;
-  font-size: 10px;
-  font-weight: 700;
-  color: #fff;
-  margin-right: 5px;
-  vertical-align: middle;
-}
-.legacy .kind-badge.gtfs {
-  background: #e67e22;
-}
-.legacy .kind-badge.osm {
-  background: #7a4fbf;
-}
-.legacy .osm-row {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-top: 8px;
-  padding: 3px 4px;
-  font-size: 12px;
-  border-top: 1px solid #eee;
-}
-.legacy .osm-row .feed-tables {
-  color: #666;
-  font-size: 11px;
-}
-.legacy .add-feed,
-.legacy .merge-form {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 8px;
-}
-.legacy .catalogue-table .group-heading td {
-  background: #f0eee9;
-  font-size: 11px;
-  padding: 3px 4px;
-}
-.legacy .catalogue-table .group-name {
-  font-weight: 700;
-  margin-right: 6px;
-}
-.legacy .catalogue-table .group-heading button {
-  font-size: 11px;
-  padding: 1px 6px;
-  margin-left: 4px;
-}
-.legacy .catalogue-table .group-rename {
-  font-size: 11px;
-  width: 45%;
-}
-.legacy .catalogue-table .group-empty td {
-  color: #888;
-  font-style: italic;
-  padding: 4px 8px;
-}
-.legacy .catalogue-table tr.dragging {
-  opacity: 0.5;
-}
-.legacy .catalogue-table .grip {
-  cursor: grab;
-  color: #999;
-  margin-right: 4px;
 }
 .legacy .check {
   display: flex;
@@ -335,51 +87,6 @@
 }
 .legacy .check input {
   width: auto;
-}
-.legacy .search-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-  margin-top: 8px;
-}
-.legacy .search-table th {
-  text-align: left;
-  color: #666;
-  font-weight: 500;
-}
-.legacy .search-table th.sortable {
-  cursor: pointer;
-  user-select: none;
-}
-.legacy .search-table th.sortable:hover {
-  color: #35507a;
-}
-.legacy .search-table td {
-  padding: 3px 4px;
-  vertical-align: top;
-  border-top: 1px solid #eee;
-}
-.legacy .search-table .feed-name {
-  font-weight: 600;
-}
-.legacy .search-table .official {
-  color: #2c7a3d;
-  margin-left: 4px;
-}
-.legacy .search-table a {
-  margin-left: 6px;
-  font-size: 11px;
-}
-.legacy .search-table .download {
-  padding: 2px 8px;
-  font-size: 11px;
-}
-.legacy .search-table .in-catalogue {
-  color: #2c7a3d;
-  font-weight: 700;
-}
-.legacy .bulk-download {
-  margin-top: 8px;
 }
 .legacy .dir-row {
   display: flex;
@@ -421,180 +128,6 @@
   color: #35507a;
   font-weight: 600;
 }
-.legacy .search code {
-  background: #eee;
-  padding: 0 3px;
-  border-radius: 3px;
-}
-.legacy .search-area {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin: 4px 0;
-}
-.legacy .search-area select {
-  font-size: 12px;
-}
-.legacy .report-summary .count {
-  margin-right: 10px;
-  font-size: 13px;
-}
-.legacy .report-summary .count.error {
-  color: #a33;
-}
-.legacy .report-summary .count.warning {
-  color: #8a6d00;
-}
-.legacy .report-summary .count.info {
-  color: #555;
-}
-.legacy .report table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-.legacy .report td:last-child {
-  text-align: right;
-  color: #666;
-}
-.legacy .network .net-error {
-  color: #a33;
-}
-.legacy .net-inspector {
-  margin-top: 8px;
-  border-top: 1px solid #eee;
-  padding-top: 6px;
-}
-.legacy .net-head {
-  font-weight: 600;
-  font-size: 12px;
-  margin-bottom: 4px;
-}
-.legacy .net-tags {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-.legacy .net-tags td {
-  padding: 1px 4px;
-  vertical-align: top;
-}
-.legacy .net-tags td:first-child {
-  color: #666;
-  white-space: nowrap;
-}
-.legacy .network code {
-  background: #eee;
-  padding: 0 3px;
-  border-radius: 3px;
-}
-.legacy .net-retag {
-  display: flex;
-  gap: 4px;
-  margin-top: 6px;
-}
-.legacy .net-retag input {
-  width: 40%;
-}
-.legacy .net-reset {
-  margin-top: 10px;
-  width: 100%;
-  color: #a33;
-}
-.legacy .net-save {
-  display: flex;
-  gap: 4px;
-  margin-top: 10px;
-}
-.legacy .net-save input {
-  flex: 1;
-}
-.legacy .net-acquire {
-  border-bottom: 1px solid #eee;
-  padding-bottom: 8px;
-  margin-bottom: 8px;
-}
-.legacy .net-acquire-title {
-  font-weight: 600;
-  font-size: 12px;
-  margin-bottom: 4px;
-}
-.legacy .net-acquire .net-retag input {
-  flex: 1;
-  width: auto;
-}
-.legacy .net-acquire .mode {
-  width: 100%;
-  margin-top: 4px;
-}
-.legacy .net-resolved {
-  margin-top: 6px;
-}
-.legacy .net-edit {
-  border: 0;
-  margin: 0;
-  padding: 0;
-  min-inline-size: auto;
-}
-.legacy .net-edit[disabled] {
-  opacity: 0.6;
-}
-.legacy .route-legend .legend-stops {
-  margin: 6px 0 2px;
-}
-.legacy .route-legend .legend-colorby {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  font-size: 12px;
-  color: #555;
-  margin: 6px 0;
-}
-.legacy .route-legend .legend-colorby label {
-  display: flex;
-  gap: 3px;
-  align-items: center;
-}
-.legacy .route-legend .legend-modes {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 2px 8px;
-  font-size: 12px;
-}
-.legacy .route-legend .legend-mode {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-}
-.legacy .route-legend .legend-all {
-  display: flex;
-  gap: 6px;
-  margin-top: 6px;
-}
-.legacy .route-legend .legend-all button {
-  padding: 2px 8px;
-  font-size: 11px;
-}
-.legacy .edit-switch {
-  font-size: 13px;
-  font-weight: 600;
-  margin-bottom: 8px;
-}
-.legacy .inspector-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.legacy .inspector-close {
-  padding: 0 6px;
-  line-height: 1.2;
-  color: #a33;
-  border: 0;
-  background: none;
-  font-size: 14px;
-}
-
 /* Map overlays and the attribute drawer (outside the aside). */
 .map-toolbar {
   display: flex;
@@ -721,13 +254,6 @@
   padding: 2px 8px;
   border-bottom: 1px solid #f0eee9;
   white-space: nowrap;
-}
-/* Feature attribute cards (hover / pinned popups). */
-.attr-popup .maplibregl-popup-content {
-  padding: 8px 10px;
-  font:
-    12px/1.4 system-ui,
-    sans-serif;
 }
 .attr-popup .attr-title {
   font-weight: 700;

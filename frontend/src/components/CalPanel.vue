@@ -40,10 +40,14 @@ onMounted(async () => {
   resetForm();
 });
 
-// A feed switch reloads the list and clears the form state.
+// A feed switch clears the draft IMMEDIATELY (before the new feed's
+// services arrive), so the old feed's draft can never be submitted
+// against the new one, then reloads and re-prefills the dates.
 watch(
   () => store.currentFeedId,
   async () => {
+    store.services = [];
+    resetForm();
     await loadServices();
     resetForm();
   },

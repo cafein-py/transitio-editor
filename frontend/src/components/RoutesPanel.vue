@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from "vue";
 
-import { loadRoutes, selectRoute } from "../actions/routes.js";
+import { loadRoutes, selectRoute, zoomToRoute } from "../actions/routes.js";
 import { toggleEditTarget } from "../actions/catalogue.js";
 import { currentFeed } from "../catalogue.js";
 import { MODES, UNKNOWN_MODE } from "../modes.js";
@@ -62,6 +62,20 @@ const chips = computed(() => [
   { key: "notrips", label: "No trips", count: null, disabled: !quality.value },
 ]);
 
+// A double-click arrives as click, click, dblclick: hold the toggle so
+// the second click cannot deselect the route the zoom is about to use.
+let clickTimer = null;
+
+function onRowClick(routeId) {
+  clearTimeout(clickTimer);
+  clickTimer = setTimeout(() => selectRoute(routeId), 220);
+}
+
+function onRowDblclick(routeId) {
+  clearTimeout(clickTimer);
+  zoomToRoute(routeId);
+}
+
 async function openForm() {
   if (!feed.value) return;
   // The form writes to the current feed; step editing on first if needed.
@@ -117,7 +131,9 @@ async function openForm() {
         class="row"
         :class="{ selected: store.selectedRouteId === route.routeId }"
         :data-selected="store.selectedRouteId === route.routeId || null"
-        @click="selectRoute(route.routeId)"
+        title="Double-click to zoom to the route"
+        @click="onRowClick(route.routeId)"
+        @dblclick="onRowDblclick(route.routeId)"
       >
         <span
           class="badge mono"

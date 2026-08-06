@@ -140,6 +140,31 @@ export function fitToStops() {
   map.fitBounds(bounds, { padding: 60, maxZoom: 15 });
 }
 
+// Fit the map to a set of shapes of one feed (a route's geometry, a
+// shape-only validation notice).
+let lastShapes = null;
+
+export function fitShapes(shapeIds, feedId) {
+  if (!map || !lastShapes || !shapeIds || !shapeIds.length) return false;
+  const wanted = new Set(shapeIds);
+  const bounds = new maplibregl.LngLatBounds();
+  let found = false;
+  for (const feature of lastShapes.features) {
+    const properties = feature.properties;
+    if (!wanted.has(properties.shape_id)) continue;
+    if (feedId && properties.feed_id !== feedId) continue;
+    const coords =
+      feature.geometry.type === "MultiLineString"
+        ? feature.geometry.coordinates.flat()
+        : feature.geometry.coordinates;
+    for (const coord of coords) bounds.extend(coord);
+    found = true;
+  }
+  if (!found) return false;
+  map.fitBounds(bounds, { padding: 60, maxZoom: 15 });
+  return true;
+}
+
 export function fitBbox(bbox) {
   if (!map || !bbox) return;
   const [minx, miny, maxx, maxy] = bbox;
@@ -412,6 +437,7 @@ async function refreshLayers(fit) {
   ]);
   if (seq !== refreshSeq) return;
   lastStops = stops;
+  lastShapes = shapes;
   map.getSource("stops").setData(stops);
   map.getSource("shapes").setData(shapes);
   setStopsData(stops.features);
@@ -469,8 +495,12 @@ export function highlightContext(context) {
     );
     if (hit) {
       map.flyTo({ center: hit.geometry.coordinates, zoom: 15 });
+      return;
     }
   }
+  // No stop to fly to (a shape-only notice): fit the highlighted shapes
+  // so the chip always takes the user to what it highlighted.
+  if (shapeIds.length) fitShapes(shapeIds, store.currentFeedId);
 }
 
 async function handleMapClick(event) {

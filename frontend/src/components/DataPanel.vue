@@ -409,7 +409,7 @@ const canMerge = computed(() => store.merge.selected.length >= 2);
             <button
               type="button"
               @click="
-                openBrowser('mergeDir', 'dir', store.merge.directory.trim() || null)
+                openBrowser('mergeDir', store.merge.directory.trim() || null)
               "
             >
               Browse…

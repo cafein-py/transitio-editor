@@ -3,7 +3,7 @@
 // actions until the landing page takes it over.
 import { api } from "../api.js";
 import { getCamera } from "../map.js";
-import { sessionLogForSave } from "../session.js";
+import { sessionLogForSave, sessionRevision } from "../session.js";
 import { sessionView } from "../sessions.js";
 import { store } from "../store.js";
 import { pushToast } from "../toasts.js";
@@ -32,7 +32,7 @@ export async function defaultWorkspaceDir() {
 async function persistWorkspace(path, name) {
   const session = store.session;
   if (session.saving) return false;
-  const logLength = session.log.length;
+  const revision = sessionRevision();
   session.saving = true;
   try {
     const view = {
@@ -49,7 +49,7 @@ async function persistWorkspace(path, name) {
     session.path = body.path;
     session.dir = body.path.split(/[\\/]/).slice(0, -1).join("/");
     // an edit that landed while the save ran is NOT in this snapshot
-    if (session.log.length === logLength) store.dirty = false;
+    if (sessionRevision() === revision) store.dirty = false;
     pushToast({ title: "workspace saved", body: body.path });
     return true;
   } catch (error) {

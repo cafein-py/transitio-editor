@@ -31,10 +31,22 @@ export function configureSession(overrides) {
   Object.assign(hooks, overrides);
 }
 
+// Monotonic across the session: the exact "did anything change since?"
+// token. The log's length is not one — it stops growing at LOG_LIMIT,
+// and an undo followed by a new action leaves it unchanged.
+let revision = 0;
+
+export function sessionRevision() {
+  return revision;
+}
+
+// Returns the new entry's id, so a caller can offer an undo bound to
+// exactly its own action (a toast that outlives later edits).
 export function logAction(entry) {
   const log = store.session.log;
+  const id = seq++;
   log.push({
-    id: seq++,
+    id,
     time: Date.now(),
     kind: "none",
     feedId: null,
@@ -42,6 +54,7 @@ export function logAction(entry) {
     ...entry,
   });
   if (log.length > LOG_LIMIT) log.splice(0, log.length - LOG_LIMIT);
+  revision += 1;
   // A new action invalidates what was undone before it, and any
   // validation report no longer reflects the data.
   store.session.redoStack.length = 0;
@@ -54,13 +67,14 @@ export function logAction(entry) {
       [logged.feedId]: true,
     };
   }
+  return id;
 }
 
 // The common cases, so call sites stay one line. Callers snapshot the
 // feed id BEFORE their await: a feed switch during the request must not
 // pin the entry (and its undo) to the wrong feed.
 export function logServerEdit(title, detail, feedId) {
-  logAction({
+  return logAction({
     kind: "server",
     feedId: feedId ?? store.currentFeedId,
     title,
@@ -161,6 +175,23 @@ async function step(from, to, direction, verb) {
 
 export async function sessionUndo() {
   await step(store.session.log, store.session.redoStack, "undo", "undone");
+}
+
+// The undo a toast offers: it reverts THAT action, so it refuses once
+// later edits have landed on top of it rather than undoing those.
+export function undoEntry(entryId) {
+  return async () => {
+    const log = store.session.log;
+    const top = log[log.length - 1];
+    if (!top || top.id !== entryId) {
+      pushToast({
+        title: "cannot undo that action any more",
+        body: "newer edits came after it — use the session drawer",
+      });
+      return;
+    }
+    await sessionUndo();
+  };
 }
 
 export async function sessionRedo() {

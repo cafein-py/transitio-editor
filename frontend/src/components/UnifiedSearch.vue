@@ -106,7 +106,7 @@ const inView = computed(
       <button
         class="btn small"
         @click="
-          openBrowser('downloadDir', 'dir', store.search.downloadDir.trim() || null)
+          openBrowser('downloadDir', store.search.downloadDir.trim() || null)
         "
       >
         Browse…
