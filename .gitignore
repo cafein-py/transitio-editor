@@ -5,6 +5,9 @@ build/
 dist/
 *.egg-info/
 .venv/
+# a resolved lockfile is not pinned in-tree: this is a library, and the
+# supported range lives in pyproject.toml
+uv.lock
 
 # Local planning and assistant files (not part of the package)
 plans/
