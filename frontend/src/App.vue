@@ -1,50 +1,67 @@
 <script setup>
-import { onMounted, watch } from "vue";
+import { computed, onMounted, watch } from "vue";
 
 import { store } from "./store.js";
-import { initialTab } from "./catalogue.js";
+import { currentFeed } from "./catalogue.js";
 import { createMap } from "./map.js";
-import {
-  checkNetworkAvailable,
-  loadCatalogue,
-  redoEdit,
-  toggleEditMode,
-  toggleTableView,
-  undoEdit,
-} from "./actions.js";
+import { editTarget } from "./network.js";
+import { refreshAfterHistory, toggleEditMode } from "./actions.js";
+import { loadCatalogue, setCurrentFeed } from "./actions/catalogue.js";
+import { checkNetworkAvailable } from "./actions/streets.js";
+import { configureSession, sessionRedo, sessionUndo } from "./session.js";
 import { undoShortcut } from "./undo.js";
-import AgencyServiceForm from "./components/AgencyServiceForm.vue";
+import AgenciesPanel from "./components/AgenciesPanel.vue";
+import AppHeader from "./components/AppHeader.vue";
+import CalPanel from "./components/CalPanel.vue";
+import CommandPalette from "./components/CommandPalette.vue";
+import DataPanel from "./components/DataPanel.vue";
+import LandingPage from "./components/LandingPage.vue";
+import MapDisplayBar from "./components/MapDisplayBar.vue";
+import NavRail from "./components/NavRail.vue";
+import RoutesPanel from "./components/RoutesPanel.vue";
+import SessionDrawer from "./components/SessionDrawer.vue";
+import StopsPanel from "./components/StopsPanel.vue";
+import StreetsPanel from "./components/StreetsPanel.vue";
+import TripsPanel from "./components/TripsPanel.vue";
+import ValidatePanel from "./components/ValidatePanel.vue";
+import WayCard from "./components/WayCard.vue";
+import Toasts from "./components/Toasts.vue";
 import AttributeTable from "./components/AttributeTable.vue";
-import CataloguePanel from "./components/CataloguePanel.vue";
-import CropPanel from "./components/CropPanel.vue";
-import CurrentFeedBar from "./components/CurrentFeedBar.vue";
-import NetworkPanel from "./components/NetworkPanel.vue";
-import SearchPanel from "./components/SearchPanel.vue";
-import FeedSummary from "./components/FeedSummary.vue";
 import BasemapControl from "./components/BasemapControl.vue";
 import MapToolbar from "./components/MapToolbar.vue";
-import RouteForm from "./components/RouteForm.vue";
-import RouteLegend from "./components/RouteLegend.vue";
-import SaveBar from "./components/SaveBar.vue";
+import CropPanel from "./components/CropPanel.vue";
 import StopInspector from "./components/StopInspector.vue";
-import TabBar from "./components/TabBar.vue";
-import TimetablePanel from "./components/TimetablePanel.vue";
-import TripForm from "./components/TripForm.vue";
-import ValidationReport from "./components/ValidationReport.vue";
 
-// A session records the tab the user was working in, not the Data tab
-// the session buttons live on.
+const feed = computed(() => currentFeed(store.catalogue, store.currentFeedId));
+const feedPanel = computed(() => editTarget(store.activePanel) === "feed");
+
+// A workspace records the panel the user was working in; the Data panel
+// is the neutral home and is not recorded.
 watch(
-  () => store.activeTab,
-  (tab) => {
-    if (tab !== "catalogue") store.workingTab = tab;
+  () => store.activePanel,
+  (panel) => {
+    if (panel !== "data") store.workingPanel = panel;
   },
 );
 
-// Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (or +Y) act while editing on the map;
-// keystrokes inside form fields stay with the field.
+// Closing the attribute drawer from its own × leaves the table layout;
+// the layout switcher is the one source of truth.
+watch(
+  () => store.tableView.open,
+  (open) => {
+    if (!open && store.layout === "table") store.layout = "sidebar";
+  },
+);
+
+// Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (or +Y) act on the session log,
+// globally; keystrokes inside form fields stay with the field.
+// Ctrl/Cmd+K toggles the palette from anywhere, fields included.
 window.addEventListener("keydown", (event) => {
-  if (!store.editMode || store.activeTab !== "view") return;
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    store.paletteOpen = !store.paletteOpen;
+    return;
+  }
   const kind = undoShortcut({
     key: event.key,
     ctrlKey: event.ctrlKey,
@@ -54,76 +71,141 @@ window.addEventListener("keydown", (event) => {
   });
   if (!kind) return;
   event.preventDefault();
-  if (kind === "undo") undoEdit();
-  else redoEdit();
+  if (kind === "undo") sessionUndo();
+  else sessionRedo();
 });
 
 onMounted(async () => {
+  // The session core stays import-cycle-free by having its refresh and
+  // feed-switching injected here.
+  configureSession({
+    refresh: refreshAfterHistory,
+    makeCurrent: async (feedId) => {
+      const feed = store.catalogue.find((entry) => entry.feed_id === feedId);
+      // `internal`: the session core owns historyBusy while it does this,
+      // so its own switch must not be refused by that guard.
+      if (feed && !feed.current) await setCurrentFeed(feed, { internal: true });
+    },
+  });
   createMap();
   await loadCatalogue();
-  // Only on startup: later removing every feed must not move the user.
-  store.activeTab = initialTab(store.catalogue);
-  // the decided startup tab counts as "worked in" (the watcher only sees
-  // changes made after this)
-  if (store.activeTab !== "catalogue") store.workingTab = store.activeTab;
   checkNetworkAvailable();
 });
 </script>
 
 <template>
-  <div id="sidebar">
-    <h1>transitio</h1>
-    <TabBar />
-    <CurrentFeedBar
-      v-show="store.activeTab === 'view' || store.activeTab === 'report'"
-    />
+  <AppHeader />
+  <div class="shell-body">
+    <NavRail />
+    <aside
+      class="shell-aside"
+      :class="{ narrow: store.layout === 'inspector' }"
+    >
+      <!-- Ported panels render their own header. -->
+      <div v-show="store.activePanel === 'data'">
+        <DataPanel />
+        <CropPanel />
+      </div>
 
-    <!-- View/Edit: explore the loaded data; flip the switch to edit it. -->
-    <div v-show="store.activeTab === 'view'">
-      <label class="check edit-switch">
-        <input
-          type="checkbox"
-          :checked="store.editMode"
-          @change="toggleEditMode"
-        />
-        editing mode
-      </label>
-      <FeedSummary />
-      <CropPanel />
-      <RouteLegend />
-      <StopInspector />
-      <template v-if="store.editMode">
-        <RouteForm />
-        <TripForm />
-        <AgencyServiceForm />
-        <TimetablePanel />
-        <SaveBar />
-      </template>
+      <StopsPanel v-show="store.activePanel === 'stops'" />
+
+      <RoutesPanel v-show="store.activePanel === 'routes'" />
+
+      <CalPanel v-show="store.activePanel === 'cal'" />
+
+      <TripsPanel v-show="store.activePanel === 'trips'" />
+
+      <AgenciesPanel v-show="store.activePanel === 'agencies'" />
+
+      <StreetsPanel v-show="store.activePanel === 'streets'" />
+
+      <ValidatePanel v-show="store.activePanel === 'validate'" />
+
+      <div v-if="store.status" class="legacy">
+        <div id="status">{{ store.status }}</div>
+      </div>
+    </aside>
+
+    <div class="shell-main">
+      <div class="map-wrap">
+        <div id="map"></div>
+        <div class="map-overlay top-left">
+          <MapDisplayBar />
+          <button
+            v-if="!store.editMode"
+            class="mode-badge"
+            :disabled="!store.catalogue.length"
+            title="Turn editing on"
+            @click="toggleEditMode"
+          >
+            <span class="badge-dot off"></span>
+            Editing mode off — read-only
+            <span class="badge-action">Enable</span>
+          </button>
+          <div v-else class="mode-badge on">
+            <span
+              class="badge-dot"
+              :style="{ background: feed ? feed.color : '#ccc' }"
+            ></span>
+            Edits go to the current feed<template v-if="feed">
+              · {{ feed.name }}</template
+            >
+          </div>
+          <MapToolbar />
+        </div>
+        <div class="map-overlay top-right">
+          <StopInspector v-if="feedPanel" />
+          <WayCard v-if="store.activePanel === 'streets'" />
+        </div>
+        <div class="map-overlay bottom-left">
+          <BasemapControl />
+        </div>
+      </div>
+      <AttributeTable />
     </div>
-
-    <NetworkPanel v-show="store.activeTab === 'network'" />
-
-    <CataloguePanel v-show="store.activeTab === 'catalogue'" />
-
-    <SearchPanel v-show="store.activeTab === 'search'" />
-
-    <ValidationReport v-show="store.activeTab === 'report'" />
-
-    <div id="status">{{ store.status }}</div>
   </div>
-  <div id="main">
-    <div id="map-wrap">
-      <div id="map"></div>
-      <MapToolbar />
-      <BasemapControl />
-      <button
-        v-if="store.activeTab === 'view'"
-        class="table-toggle"
-        @click="toggleTableView"
-      >
-        {{ store.tableView.open ? "Hide table" : "Table" }}
-      </button>
-    </div>
-    <AttributeTable />
-  </div>
+  <SessionDrawer />
+  <LandingPage />
+  <CommandPalette />
+  <Toasts />
 </template>
+
+<style scoped>
+.panel-title {
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.mode-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-pill);
+  box-shadow: var(--shadow-overlay);
+  padding: 4px 11px;
+  font: 11.5px var(--sans);
+  color: var(--ink-3);
+  cursor: default;
+}
+button.mode-badge {
+  cursor: pointer;
+}
+.mode-badge.on {
+  color: var(--ink);
+}
+.badge-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex: none;
+}
+.badge-dot.off {
+  background: var(--ink-disabled);
+}
+.badge-action {
+  color: var(--accent);
+  font-weight: 600;
+}
+</style>

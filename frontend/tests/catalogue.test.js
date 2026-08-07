@@ -8,7 +8,6 @@ import {
   feedModes,
   feedTableSummary,
   groupedCatalogue,
-  initialTab,
   mergeStatus,
   moveFeedToGroup,
 } from "../src/catalogue.js";
@@ -41,27 +40,6 @@ describe("currentFeed", () => {
     expect(currentFeed(catalogue, "feed-9")).toBeNull();
     expect(currentFeed(catalogue, null)).toBeNull();
     expect(currentFeed([], "feed-1")).toBeNull();
-  });
-});
-
-describe("initialTab", () => {
-  it("starts on the data when a feed is loaded", () => {
-    expect(initialTab([{ feed_id: "feed-1", source: "/feeds/hsl.zip" }])).toBe(
-      "view",
-    );
-    // a feed built in the GUI has no source file but does have tables
-    expect(
-      initialTab([{ feed_id: "feed-1", tables: { "stops.txt": 2 } }]),
-    ).toBe("view");
-  });
-
-  it("starts on Search with nothing to show", () => {
-    // launching without a feed registers an empty builder to build on
-    expect(initialTab([{ feed_id: "feed-1", source: null, tables: {} }])).toBe(
-      "search",
-    );
-    expect(initialTab([])).toBe("search");
-    expect(initialTab(undefined)).toBe("search");
   });
 });
 

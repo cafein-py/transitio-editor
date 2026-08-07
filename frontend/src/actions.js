@@ -1,13 +1,16 @@
 // Feature actions shared by the sidebar panels. Each mutates the store
 // and/or calls the API, then refreshes the map. `wrap` funnels errors to
 // the status line and marks the validation report stale.
-import { api } from "./api.js";
+import { api, writesPending } from "./api.js";
+import { loadAgencies } from "./actions/agencies.js";
+import { loadCatalogue } from "./actions/catalogue.js";
+import { loadServices } from "./actions/services.js";
 import {
-  cropRequestBody,
-  cropStatus,
-  mergeStatus,
-  moveFeedToGroup,
-} from "./catalogue.js";
+  checkNetworkAvailable,
+  invalidateAcquire,
+  invalidateResolve,
+} from "./actions/streets.js";
+import { invalidateTripLoads, loadRouteTrips } from "./actions/trips.js";
 import {
   restoreSessionStatus,
   saveSessionStatus,
@@ -15,325 +18,26 @@ import {
   sessionView,
 } from "./sessions.js";
 import * as mapBridge from "./map.js";
-import { MODES, UNKNOWN_MODE } from "./modes.js";
+import { setShapeColorBy } from "./actions/mapView.js";
 import { isDownloaded } from "./search.js";
-import { forms, resetForms, store } from "./store.js";
-
-// A slow pre-restore availability check must not overwrite the state a
-// session restore has since installed.
-let networkAvailableSeq = 0;
-
-export async function checkNetworkAvailable() {
-  const seq = ++networkAvailableSeq;
-  try {
-    const body = await api("GET", "/api/network");
-    if (seq !== networkAvailableSeq) return;
-    store.network.available = Boolean(body.available);
-    store.network.source = body.source || null;
-    // Both domains are visible by default: load the network eagerly so it
-    // shows alongside the feed from the start, not only after opening the tab.
-    if (store.network.available) await loadNetwork();
-  } catch (error) {
-    if (seq !== networkAvailableSeq) return;
-    store.network.available = false;
-  }
-}
-
-export async function loadNetwork() {
-  const net = store.network;
-  if (net.loaded || net.loading || !net.available) return;
-  net.loading = true;
-  net.error = "";
-  try {
-    await mapBridge.mapReady; // sources exist before we set their data
-    if ((await mapBridge.fetchNetwork()) === false) return; // superseded
-    net.loaded = true;
-    mapBridge.setNetworkVisible(net.visible);
-  } catch (error) {
-    net.error = error.message;
-  } finally {
-    net.loading = false;
-  }
-}
-
-export function setNetworkMode(mode) {
-  store.network.mode = mode;
-  store.network.movingNode = null;
-  mapBridge.clearNetworkDraw();
-  mapBridge.setCursor(
-    mode === "add-node" || mode === "draw-way" ? "crosshair" : "",
-  );
-}
-
-export async function finishDrawWay(tags) {
-  if (store.network.draw.length < 2) return;
-  const vertices = store.network.draw.map((point) => point.vertex);
-  try {
-    await api("POST", "/api/network/ways", { vertices, tags });
-    setNetworkMode("select"); // clears the draw and its preview
-    await mapBridge.fetchNetwork();
-    store.status = "";
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-export function cancelDrawWay() {
-  setNetworkMode("select");
-}
-
-export async function deleteNetworkWay() {
-  const selected = store.network.selected;
-  if (!selected) return;
-  try {
-    await api("DELETE", `/api/network/ways/${selected.id}`);
-    store.network.selected = null;
-    mapBridge.setSelectedNetworkFeature(null);
-    await mapBridge.fetchNetwork();
-    store.status = "";
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-export async function retagNetworkWay(key, value) {
-  const selected = store.network.selected;
-  if (!selected || !key.trim()) return;
-  try {
-    await api("PATCH", `/api/network/ways/${selected.id}`, {
-      tags: { [key.trim()]: value },
-    });
-    store.network.selected = { ...selected, [key.trim()]: value };
-    await mapBridge.fetchNetwork();
-    store.status = "";
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-export function startMoveNode() {
-  const selected = store.network.selected;
-  if (!selected) return;
-  store.network.movingNode = selected.id;
-  store.status = "click the new location of the node";
-  mapBridge.setCursor("crosshair");
-}
-
-export async function deleteNetworkNode() {
-  const selected = store.network.selected;
-  if (!selected) return;
-  try {
-    await api("DELETE", `/api/network/nodes/${selected.id}`);
-    store.network.selected = null;
-    mapBridge.setSelectedNetworkFeature(null);
-    await mapBridge.fetchNetwork();
-    store.status = "";
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-export async function retagNetworkNode(key, value) {
-  const selected = store.network.selected;
-  if (!selected || !key.trim()) return;
-  try {
-    await api("PATCH", `/api/network/nodes/${selected.id}`, {
-      tags: { [key.trim()]: value },
-    });
-    // reflect the tag on the still-selected node without a re-click
-    store.network.selected = { ...selected, [key.trim()]: value };
-    await mapBridge.fetchNetwork();
-    store.status = "";
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-export async function saveNetwork(path) {
-  if (!path.trim()) return;
-  try {
-    const body = await api("POST", "/api/network/save", { path: path.trim() });
-    store.status = `network saved to ${body.path}`;
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-export async function resetNetwork() {
-  try {
-    await api("POST", "/api/network/reset");
-    store.network.selected = null;
-    mapBridge.setSelectedNetworkFeature(null);
-    setNetworkMode("select"); // clears an in-progress draw and its preview
-    await mapBridge.fetchNetwork();
-    store.status = "network edits discarded";
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-let resolveSeq = 0;
-
-export async function resolveOsm(aoi) {
-  const acquire = store.network.acquire;
-  const seq = ++resolveSeq; // only the latest resolve may write the result
-  acquire.resolving = true;
-  acquire.error = "";
-  acquire.resolved = null;
-  try {
-    const resolved = await api("POST", "/api/osm/resolve", { aoi });
-    if (seq !== resolveSeq) return;
-    acquire.resolved = resolved;
-    store.status = "";
-  } catch (error) {
-    if (seq !== resolveSeq) return;
-    acquire.error = error.message;
-  } finally {
-    if (seq === resolveSeq) acquire.resolving = false;
-  }
-}
-
-export function resolveOsmByPlace() {
-  const place = store.network.acquire.place.trim();
-  if (place) resolveOsm(place);
-}
-
-export function resolveOsmByView() {
-  const bbox = mapBridge.getViewportBbox();
-  if (bbox) {
-    resolveOsm(bbox);
-  } else {
-    // A failed new request must invalidate any prior resolved extract so its
-    // Download button can't act on a stale AOI.
-    store.network.acquire.resolved = null;
-    store.network.acquire.error = "the current map view is not a valid area";
-  }
-}
-
-export function resolveOsmByDrawn() {
-  if (store.aoi) resolveOsm(store.aoi);
-  else store.network.acquire.error = "draw an area on the map first";
-}
-
-export function cancelAcquire() {
-  store.network.acquire.resolved = null;
-  store.network.acquire.error = "";
-}
-
-export { startAoiDraw, clearAoi } from "./map.js";
-
-export async function acquireOsm(discardEdits = false) {
-  const net = store.network;
-  const acquire = net.acquire;
-  const resolved = acquire.resolved;
-  if (!resolved || acquire.downloading) return;
-  // An in-progress draw/move references the current network and would be
-  // discarded by the swap; confirm rather than dropping it silently.
-  const hasDraft = net.draw.length > 0 || net.movingNode != null;
-  if (hasDraft && !discardEdits) {
-    if (
-      !window.confirm(
-        "Discard the in-progress drawing and acquire a new extract?",
-      )
-    )
-      return;
-  }
-  acquire.downloading = true;
-  acquire.error = "";
-  try {
-    const downloaded = await api("POST", "/api/osm/download", {
-      bbox: resolved.bbox,
-      url: resolved.url,
-      discard_edits: discardEdits,
-    });
-    net.source = downloaded.path;
-  } catch (error) {
-    // 409 on submitted-but-unsaved edits: confirm discarding, then retry once.
-    if (
-      error.status === 409 &&
-      !discardEdits &&
-      /unsaved network edits/.test(error.message)
-    ) {
-      acquire.downloading = false;
-      if (
-        window.confirm(
-          "Discard unsaved network edits and load the new extract?",
-        )
-      ) {
-        return acquireOsm(true);
-      }
-      return;
-    }
-    acquire.error = error.message;
-    acquire.downloading = false;
-    return;
-  }
-  // The network changed: reset view state and render the new one.
-  net.available = true;
-  net.loaded = false;
-  net.selected = null;
-  mapBridge.setSelectedNetworkFeature(null);
-  net.error = "";
-  setNetworkMode("select"); // clears any in-progress draw/move
-  try {
-    await mapBridge.mapReady;
-    await mapBridge.fetchNetwork();
-    net.loaded = true;
-    mapBridge.setNetworkVisible(net.visible);
-    mapBridge.fitBbox(resolved.bbox);
-    await mapBridge.refreshSummary(); // snapping is now available
-    store.status = `loaded OSM extract "${resolved.name}"`;
-  } catch (error) {
-    net.error = error.message;
-  } finally {
-    acquire.downloading = false;
-    acquire.resolved = null;
-    acquire.place = "";
-  }
-}
-
-export function toggleNetworkVisible() {
-  store.network.visible = !store.network.visible;
-  mapBridge.setNetworkVisible(store.network.visible);
-}
-
-export function toggleFeedVisible() {
-  store.feedVisible = !store.feedVisible;
-  mapBridge.setFeedVisible(store.feedVisible);
-}
-
-export function toggleStopsVisible() {
-  store.stopsVisible = !store.stopsVisible;
-  mapBridge.setStopsVisible(store.stopsVisible);
-}
-
-export function setShapeColorBy(colorBy) {
-  store.shapeColorBy = colorBy;
-  mapBridge.setShapeColorBy(colorBy);
-}
-
-export function toggleModeHidden(code) {
-  const hidden = store.hiddenModes;
-  const index = hidden.indexOf(code);
-  if (index === -1) hidden.push(code);
-  else hidden.splice(index, 1);
-  mapBridge.setHiddenModes([...hidden]);
-}
-
-export function setAllModesHidden(hidden) {
-  const codes = hidden
-    ? [...MODES.map((mode) => mode.code), UNKNOWN_MODE.code]
-    : [];
-  store.hiddenModes.splice(0, store.hiddenModes.length, ...codes);
-  mapBridge.setHiddenModes([...store.hiddenModes]);
-}
+import {
+  installRestoredLog,
+  logPlain,
+  logServerEdit,
+  sessionLogForSave,
+  sessionRevision,
+} from "./session.js";
+import { store } from "./store.js";
+import { DEFAULT_HIDDEN_CLASSES } from "./streets.js";
 
 export function wrap(action) {
   return async (...args) => {
     try {
       await action(...args);
       store.status = "";
-      if (store.report) store.reportStale = true;
+      // dirty/reportStale are NOT set here: a cancelled prompt returns
+      // normally without mutating anything. The session log (which every
+      // committed mutation reports to) sets both.
     } catch (error) {
       store.status = error.message;
     }
@@ -341,12 +45,20 @@ export function wrap(action) {
 }
 
 export function toggleEditMode() {
+  if (store.validating) {
+    // The sweep temporarily repoints the backend's current feed;
+    // arming edits meanwhile could write to the feed being validated.
+    store.status = "validation is running — try again in a moment";
+    return;
+  }
   store.editMode = !store.editMode;
   // Leaving edit mode disarms any pending map mutation (add stop, draw,
-  // move, trip-stop picking) so the read-only view really is read-only.
+  // move, trip-stop picking, a confirmed crop area) so the read-only
+  // view really is read-only.
   if (!store.editMode) {
     setMode("select");
     store.tripPicking = false;
+    mapBridge.cancelCropDraw();
   }
 }
 
@@ -421,6 +133,7 @@ export function cancelShape() {
 }
 
 export const finishShape = wrap(async () => {
+  const feedId = store.currentFeedId;
   // Wait out any in-flight snap so the newest drawn point is included.
   const coords = await mapBridge.previewCoordsSettled();
   if (coords.length < 2) {
@@ -432,24 +145,15 @@ export const finishShape = wrap(async () => {
     shape_id: shapeId,
     points: coords.map(([lon, lat]) => [lat, lon]),
   });
+  logServerEdit("Shape drawn", shapeId, feedId);
   cancelShape();
-  await mapBridge.refreshAll(false);
-});
-
-export const updateInspectedStop = wrap(async () => {
-  await api(
-    "PATCH",
-    `/api/stops/${encodeURIComponent(store.inspector.stopId)}`,
-    {
-      stop_name: store.inspector.name,
-    },
-  );
   await mapBridge.refreshAll(false);
 });
 
 export function closeInspector() {
   store.inspector = null;
   store.movingStop = null;
+  store.selectedStopId = null;
   mapBridge.setSelectedStop(null); // the halo follows the selection
 }
 
@@ -459,239 +163,14 @@ export function startMovingStop() {
   mapBridge.setCursor("crosshair");
 }
 
-export const submitRoute = wrap(async () => {
-  await api("POST", "/api/routes", {
-    ...forms.route,
-    agency_id: forms.route.agency_id || null,
-  });
-  forms.route.route_id = "";
-  forms.route.route_short_name = "";
-  await mapBridge.refreshAll(false);
-});
-
-export const submitTrip = wrap(async () => {
-  await api("POST", "/api/trips/frequency", {
-    ...forms.trip,
-    shape_id: forms.trip.shape_id || null,
-    stops: store.tripStops.map((entry) => [entry.stopId, entry.offset]),
-  });
-  store.tripStops.length = 0;
-  forms.trip.trip_id = "";
-  await mapBridge.refreshAll(false);
-});
-
-export const submitAgency = wrap(async () => {
-  await api("POST", "/api/agencies", { ...forms.agency });
-  await mapBridge.refreshAll(false);
-});
-
-export const submitService = wrap(async () => {
-  await api("POST", "/api/services", { ...forms.service });
-  await mapBridge.refreshAll(false);
-});
-
-export async function validateFeed() {
-  try {
-    const body = await api("POST", "/api/validate", {});
-    store.report = body.report;
-    store.reportStale = false;
-    store.status = "";
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-export async function onTimetableToggle(open) {
-  if (!open) return;
-  try {
-    store.routes = (await api("GET", "/api/routes")).routes;
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-export async function loadTrips() {
-  store.trip = null;
-  try {
-    const route = encodeURIComponent(store.timetableRoute);
-    store.routeTrips = (await api("GET", `/api/routes/${route}/trips`)).trips;
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-export async function loadTrip(tripId) {
-  try {
-    store.trip = await api(
-      "GET",
-      `/api/trips/${encodeURIComponent(tripId)}/times`,
-    );
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-export const applyTripTimes = wrap(async () => {
-  const updates = {};
-  for (const row of store.trip.times) {
-    updates[row.stop_sequence] = {
-      arrival_time: row.arrival_time,
-      departure_time: row.departure_time,
-    };
-  }
-  await api(
-    "PUT",
-    `/api/trips/${encodeURIComponent(store.trip.trip_id)}/times`,
-    {
-      times: updates,
-    },
-  );
-  await loadTrip(store.trip.trip_id);
-  await mapBridge.refreshSummary(); // the undo label just changed
-});
-
-export const deleteTrip = wrap(async () => {
-  await api("DELETE", `/api/trips/${encodeURIComponent(store.trip.trip_id)}`);
-  store.trip = null;
-  await loadTrips();
-  await mapBridge.refreshAll(false);
-});
-
-export const shiftTrip = wrap(async () => {
-  await api(
-    "POST",
-    `/api/trips/${encodeURIComponent(store.trip.trip_id)}/shift`,
-    {
-      seconds: store.shiftSeconds,
-    },
-  );
-  await loadTrip(store.trip.trip_id);
-  await mapBridge.refreshSummary(); // the undo label just changed
-});
-
-// Overlapping reloads (a drop while another mutation settles) must not
-// let an older listing paint over a newer one.
-let catalogueSeq = 0;
-
-export async function loadCatalogue() {
-  const seq = ++catalogueSeq;
-  try {
-    const body = await api("GET", "/api/catalogue");
-    if (seq !== catalogueSeq) return;
-    store.catalogue = body.feeds;
-    store.groups = body.groups || [];
-    store.currentFeedId = body.current;
-  } catch (error) {
-    if (seq !== catalogueSeq) return;
-    store.status = error.message;
-  }
-}
-
-// Every group mutation re-reads the catalogue rather than assigning the
-// response directly: loadCatalogue is the one guarded writer, so an
-// older in-flight listing cannot paint over the change.
-export async function createGroup() {
-  const name = store.newGroupName.trim();
-  if (!name) return;
-  try {
-    await api("POST", "/api/catalogue/groups", { name });
-    store.newGroupName = "";
-    store.status = "";
-    await loadCatalogue();
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-export async function renameGroup(name, newName) {
-  const target = (newName || "").trim();
-  if (!target || target === name) return;
-  try {
-    await api("PATCH", "/api/catalogue/groups", { name, new_name: target });
-    await loadCatalogue();
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-export async function deleteGroup(name) {
-  try {
-    await api(
-      "DELETE",
-      `/api/catalogue/groups?name=${encodeURIComponent(name)}`,
-    );
-    await loadCatalogue();
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-// Drag and drop between group sections; the pure part is moveFeedToGroup.
-export function startFeedDrag(feed) {
-  store.draggingFeedId = feed.feed_id;
-}
-
-export function endFeedDrag() {
-  store.draggingFeedId = null;
-}
-
-// Drops are applied one at a time, in the order they happened: parallel
-// PATCHes could otherwise land out of order and file a feed in the group
-// it was dragged out of. `requested` holds each feed's latest requested
-// group so a quick drag-back is not read as a no-op against the
-// not-yet-reloaded catalogue.
-let dropQueue = Promise.resolve();
-const requested = new Map();
-
-export async function dropFeedInGroup(group) {
-  const feed = store.catalogue.find(
-    (entry) => entry.feed_id === store.draggingFeedId,
-  );
-  store.draggingFeedId = null;
-  if (!feed) return;
-  const pending = requested.has(feed.feed_id)
-    ? { ...feed, group: requested.get(feed.feed_id) }
-    : feed;
-  const move = moveFeedToGroup(pending, group);
-  if (!move) return;
-  requested.set(move.feed_id, move.group);
-  dropQueue = dropQueue.then(async () => {
-    try {
-      await api("PATCH", `/api/catalogue/${encodeURIComponent(move.feed_id)}`, {
-        group: move.group,
-      });
-      await loadCatalogue();
-    } catch (error) {
-      store.status = error.message;
-    } finally {
-      if (requested.get(move.feed_id) === move.group) {
-        requested.delete(move.feed_id);
-      }
-    }
-  });
-  await dropQueue;
-}
-
-export async function addFeed() {
-  const path = store.newFeedPath.trim();
-  if (!path) return;
-  try {
-    await api("POST", "/api/catalogue", { path });
-    store.newFeedPath = "";
-    await loadCatalogue();
-    await mapBridge.refreshAll(true);
-    store.status = "";
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
 // Interaction state (selection, drafts, timetable, report) is scoped to
 // the current feed; wipe it when the edit target changes so later actions
 // can't target entities from the previous feed.
-function resetFeedScopedState() {
+export function resetFeedScopedState() {
   setMode("select"); // also clears movingStop and the draw preview
   store.inspector = null;
+  store.selectedStopId = null;
+  store.selectedRouteId = null;
   mapBridge.clearFeedSelection();
   resetTableView();
   store.tripStops.length = 0;
@@ -700,110 +179,24 @@ function resetFeedScopedState() {
   store.timetableRoute = "";
   store.routeTrips = [];
   store.routes = [];
+  store.services = [];
+  store.agencies = [];
+  mapBridge.setRouteFocus([], null); // the picked route's dimming
   store.report = null;
-  store.reportStale = false;
+  // The banner follows the retained reports: it stays up if any OTHER
+  // feed's report is stale, not just the freshly switched-to one's.
+  store.reportStale = Object.keys(store.staleReportFeeds).some(
+    (id) => store.reports[id],
+  );
   store.saveResult = null;
   store.undoLabel = null; // the old feed's labels must not stay actionable
   store.redoLabel = null;
-  resetForms();
   mapBridge.clearHighlight();
 }
 
-export async function setCurrentFeed(feed) {
-  try {
-    const body = await api("PUT", "/api/catalogue/current", {
-      feed_id: feed.feed_id,
-    });
-    resetFeedScopedState();
-    // Reflect the committed switch locally so the UI stays consistent even
-    // if the follow-up reload fails; loadCatalogue then refreshes the rest.
-    store.currentFeedId = body.current;
-    for (const entry of store.catalogue) {
-      entry.current = entry.feed_id === body.current;
-    }
-    await loadCatalogue();
-    await mapBridge.refreshSummary();
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-export async function toggleFeedActive(feed) {
-  try {
-    await api("PATCH", `/api/catalogue/${encodeURIComponent(feed.feed_id)}`, {
-      active: !feed.active,
-    });
-    await loadCatalogue();
-    await mapBridge.refreshAll(false);
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-export async function removeFeed(feed) {
-  try {
-    await api("DELETE", `/api/catalogue/${encodeURIComponent(feed.feed_id)}`);
-    // Removing the current feed reassigns current, so drop its state too.
-    if (feed.current) resetFeedScopedState();
-    store.merge.selected = store.merge.selected.filter(
-      (id) => id !== feed.feed_id,
-    );
-    await loadCatalogue();
-    await mapBridge.refreshAll(false);
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
-// Cropping the feeds on the map to the drawn area. The shape is drawn
-// first and confirmed here, so an accidental double-click cannot start a
-// long operation and the options can be set before it runs.
-export async function cropToShape() {
-  const body = cropRequestBody(store.cropShape, store.crop);
-  if (!body || store.crop.running) return;
-  store.crop.running = true;
-  try {
-    const result = await api("POST", "/api/catalogue/crop", body);
-    mapBridge.cancelCropDraw(); // clears the shape and the drawing state
-    await loadCatalogue();
-    await mapBridge.refreshAll(false);
-    await mapBridge.refreshSummary();
-    store.status = cropStatus(result);
-  } catch (error) {
-    store.status = error.message;
-  } finally {
-    store.crop.running = false;
-  }
-}
-
-// Saving and restoring sessions. The view snapshot and the restore
-// decision table are pure (sessions.js); these actions do the IO and
-// call the map bridge.
-export async function saveSession() {
-  const session = store.session;
-  const path = session.path.trim();
-  if (!path || session.saving) return;
-  session.saving = true;
-  try {
-    const base = path.split(/[\\/]/).pop(); // both separator styles
-    // derive .json only for an extensionless name (a leading or trailing
-    // dot is not an extension); a wrong real extension is the server's
-    // 422 to give, not something to silently double up
-    const hasExtension = /[^./\\]\.[^.]+$/.test(base);
-    const target = hasExtension ? path : `${path.replace(/\.$/, "")}.json`;
-    const body = await api("POST", "/api/session/save", {
-      path: target,
-      view: sessionView(store, mapBridge.getCamera()),
-    });
-    session.path = body.path;
-    store.status = saveSessionStatus(body);
-  } catch (error) {
-    store.status = error.message;
-  } finally {
-    session.saving = false;
-  }
-}
-
+// Restoring sessions. The view snapshot and the restore decision
+// table are pure (sessions.js); the actions do the IO and call the map
+// bridge. Saving goes through actions/workspace.js (the header).
 function applySessionView(view) {
   const plan = sessionRestorePlan(view || {});
   if (plan.basemap) mapBridge.setBasemap(plan.basemap);
@@ -816,33 +209,93 @@ function applySessionView(view) {
     store.stopsVisible = plan.stopsVisible;
     mapBridge.setStopsVisible(plan.stopsVisible);
   }
-  if (plan.activeTab) {
-    store.activeTab = plan.activeTab;
-    // the restored tab is now the working tab (or none, for Data)
-    store.workingTab = plan.activeTab === "catalogue" ? null : plan.activeTab;
+  if (plan.networkVisible !== undefined) {
+    store.network.visible = plan.networkVisible;
+    mapBridge.setNetworkVisible(plan.networkVisible);
   }
+  if (plan.activePanel) {
+    store.activePanel = plan.activePanel;
+    // the restored panel is now the working panel (or none, for Data)
+    store.workingPanel = plan.activePanel === "data" ? null : plan.activePanel;
+  }
+  // Workspace extras ride in the same view blob: the name and the
+  // activity log (viewable after a reload, not undoable — the server
+  // holds no history for pre-save actions).
+  if (typeof view.ws_name === "string" && view.ws_name) {
+    store.session.wsName = view.ws_name;
+    store.session.named = true;
+  }
+  if (typeof view.network_name === "string" && view.network_name) {
+    store.network.displayName = view.network_name;
+  }
+  installRestoredLog(view.log);
   if (plan.camera) mapBridge.jumpTo(plan.camera.center, plan.camera.zoom);
   else if (plan.fit) mapBridge.fitToStops();
 }
 
+// Resolves true only when the restore committed; a 409 confirm request
+// and every failure resolve false, so callers (the landing page) never
+// announce a restore that did not happen.
 export async function loadSession(flags = {}) {
   const session = store.session;
   const path = session.path.trim();
-  if (!path || session.loading) return;
+  if (!path || session.loading) return false;
   session.loading = true;
+  // The restore has two phases: the backend commit (can genuinely fail)
+  // and client rehydration (after the commit the backend HAS switched —
+  // a hiccup here is a partial-view problem, not a failed restore, and
+  // must not report "nothing restored" against a switched backend).
+  let body;
   try {
-    const body = await api("POST", "/api/session/restore", {
+    body = await api("POST", "/api/session/restore", {
       path,
       ...flags,
     });
+  } catch (error) {
+    const detail = error.status === 409 ? error.detail : null;
+    if (detail && typeof detail === "object") {
+      // the server names what would be lost; ask, then retry with the
+      // matching flag added (both confirms can appear in sequence)
+      session.confirm = { ...detail, flags, path };
+    } else {
+      store.status = error.message;
+    }
+    session.loading = false;
+    return false;
+  }
+  try {
     session.confirm = null;
     await mapBridge.mapReady; // layer resets below need the sources
     resetFeedScopedState();
+    // Workspace-scoped state must not leak between workspaces either:
+    // reports, editing, the dirty dot and the old workspace's identity.
+    store.workspaceVersion += 1; // panels drop drafts even on a same-id feed
+    store.reports = {};
+    store.staleReportFeeds = {};
+    store.reportStale = false;
+    store.editMode = false;
+    store.dirty = false;
+    session.wsName = "";
+    session.named = false;
+    session.savedAt = null;
+    // view-state defaults the restored view blob does not carry
+    store.feedVisible = true;
+    mapBridge.setFeedVisible(true);
+    store.network.visible = true; // a hidden network must not carry over
+    store.hiddenHighwayClasses.splice(
+      0,
+      store.hiddenHighwayClasses.length,
+      ...DEFAULT_HIDDEN_CLASSES,
+    );
+    store.aoi = null;
+    mapBridge.cancelCropDraw();
     // the old network's layers, drafts and acquire state must not
-    // survive into the new session; bump the resolve seq so an in-flight
-    // resolve cannot repopulate it either
+    // survive into the new session; bump the sequences so in-flight
+    // resolves, downloads and trip loads cannot repopulate it either
     store.merge.selected = []; // ids from the replaced catalogue
-    resolveSeq += 1;
+    invalidateResolve(); // an in-flight resolve must not repopulate acquire
+    invalidateAcquire(); // an in-flight download must not install itself
+    invalidateTripLoads(); // an in-flight trip fetch must not repaint
     mapBridge.invalidateNetwork(); // an in-flight fetch must not repaint
     Object.assign(store.network.acquire, {
       place: "",
@@ -855,63 +308,74 @@ export async function loadSession(flags = {}) {
       loaded: false,
       loading: false,
       selected: null,
+      editing: false,
+      vertexEdit: false,
+      savePath: "",
+      displayName: null,
+      bbox: null,
       nodeCount: 0,
       wayCount: 0,
-      mode: "select",
-      movingNode: null,
-      draw: [],
       error: "",
     });
-    mapBridge.clearNetworkDraw(); // a way begun against the old extract
     mapBridge.setNetworkData(
       { type: "FeatureCollection", features: [] },
       { type: "FeatureCollection", features: [] },
     );
     await loadCatalogue();
+    // panels keyed by feed id would miss a same-id workspace swap
+    await loadServices();
+    await loadAgencies();
     await mapBridge.refreshAll(false);
     await mapBridge.refreshSummary();
     await checkNetworkAvailable();
     applySessionView(body.view);
+    // The restored file is now the workspace's canonical location:
+    // later direct saves write there, and Save-as prefills its folder.
+    store.session.dir = session.path.split(/[\\/]/).slice(0, -1).join("/");
     store.status = restoreSessionStatus(body);
   } catch (error) {
-    const detail = error.status === 409 ? error.detail : null;
-    if (detail && typeof detail === "object") {
-      // the server names what would be lost; ask, then retry with the
-      // matching flag added (both confirms can appear in sequence)
-      session.confirm = { ...detail, flags };
-    } else {
-      store.status = error.message;
-    }
+    // committed on the backend, partially hydrated here: say so and
+    // keep the workspace open rather than pretending nothing happened
+    store.status = `workspace restored — reloading the view failed: ${error.message}`;
   } finally {
     session.loading = false;
   }
+  return true;
 }
 
 export async function confirmLoadSession() {
   const confirm = store.session.confirm;
-  if (!confirm) return;
+  if (!confirm) return false;
   const flag = confirm.reason === "osm-edits" ? "discard_edits" : "replace";
   store.session.confirm = null;
-  await loadSession({ ...confirm.flags, [flag]: true });
+  // The confirmation applies to the workspace it was raised for, even
+  // if another row changed session.path meanwhile.
+  if (confirm.path) store.session.path = confirm.path;
+  return loadSession({ ...confirm.flags, [flag]: true });
 }
 
 export function cancelLoadSession() {
   store.session.confirm = null;
 }
 
-// Undo/redo against the current feed; the server peeks the labels.
-let undoBusy = false;
-
-// Every feed-scoped view must reflect the reverted tables: stale
-// editable values (an open timetable, the attribute table) could
+// Every feed-scoped view must reflect reverted tables after an undo/redo:
+// stale editable values (an open timetable, the attribute table) could
 // otherwise be saved back, silently re-applying what was just undone.
-async function refreshAfterHistory() {
+// The session core calls this via its injected refresh hook.
+export async function refreshAfterHistory() {
   await mapBridge.refreshAll(false);
+  // Undo/redo can touch any domain: groups (compensating group moves),
+  // agencies/services (their add entries), and the OSM network
+  // (compensating reclass/vertex requests) all reload alongside the map.
+  await loadCatalogue();
+  await loadServices();
+  await loadAgencies();
+  if (store.network.loaded) await mapBridge.fetchNetwork();
   if (store.tableView.open) await loadTable();
-  if (store.timetableRoute) await loadTrips();
+  if (store.timetableRoute) await loadRouteTrips();
   if (store.trip) {
-    // fetched inline: loadTrip swallows its own errors, and a trip the
-    // undo removed must clear the stale editable detail, not keep it
+    // fetched inline: a trip the undo removed must clear the stale
+    // editable detail, not keep it
     try {
       store.trip = await api(
         "GET",
@@ -922,115 +386,6 @@ async function refreshAfterHistory() {
     }
   }
   closeInspector(); // its stop may no longer exist or match
-}
-
-async function runHistory(path, verb) {
-  if (undoBusy) return;
-  undoBusy = true;
-  try {
-    let body;
-    try {
-      // the feed id pins the request to the feed the label came from
-      body = await api("POST", path, { feed_id: store.currentFeedId });
-    } catch (error) {
-      store.status = error.message;
-      return;
-    }
-    // committed: report it as done even if the refresh below hiccups —
-    // a refresh error must not read as "the undo failed, try again"
-    const label = body.undone ?? body.redone;
-    store.status = `${verb} ${label}`;
-    try {
-      await refreshAfterHistory();
-    } catch (error) {
-      store.status = `${verb} ${label} — refresh failed: ${error.message}`;
-    }
-  } finally {
-    undoBusy = false;
-  }
-}
-
-export async function undoEdit() {
-  if (!store.undoLabel) return;
-  await runHistory("/api/undo", "undid");
-}
-
-export async function redoEdit() {
-  if (!store.redoLabel) return;
-  await runHistory("/api/redo", "redid");
-}
-
-export function toggleMergeSelected(feed) {
-  const selected = store.merge.selected;
-  store.merge.selected = selected.includes(feed.feed_id)
-    ? selected.filter((id) => id !== feed.feed_id)
-    : [...selected, feed.feed_id];
-}
-
-export async function mergeSelected() {
-  const merge = store.merge;
-  if (merge.selected.length < 2 || merge.merging) return;
-  merge.merging = true;
-  try {
-    const directory = merge.directory.trim();
-    const body = await api("POST", "/api/catalogue/merge", {
-      feed_ids: [...merge.selected],
-      name: merge.name.trim(),
-      ...(directory ? { directory } : {}),
-    });
-    // The merge makes the new feed current, so old feed-scoped state goes.
-    resetFeedScopedState();
-    merge.selected = [];
-    merge.name = "";
-    await loadCatalogue();
-    await mapBridge.refreshAll(false);
-    await mapBridge.refreshSummary();
-    store.status = mergeStatus(body.name, body.dropped_files, body.saved);
-  } catch (error) {
-    store.status = error.message;
-  } finally {
-    merge.merging = false;
-  }
-}
-
-export async function runSearch() {
-  const s = store.search;
-  s.searching = true;
-  s.selected = []; // old selections must not survive into new results
-  s.searched = true;
-  try {
-    const params = new URLSearchParams();
-    const q = s.q.trim();
-    let areaHint = "";
-    if (q) {
-      params.set("q", q); // a typed place decides the area
-    } else {
-      const bbox = searchAoiBbox();
-      if (bbox) params.set("bbox", bbox.join(","));
-      // Don't silently drop a requested area filter.
-      if (s.aoiMode !== "none" && !bbox) {
-        areaHint = "no area available — searched everywhere";
-      }
-    }
-    if (s.officialOnly) params.set("official", "true");
-    params.set("limit", String(s.limit));
-    const body = await api("GET", `/api/search?${params.toString()}`);
-    s.results = body.feeds;
-    s.csvFallback = body.csv_fallback;
-    if (body.place) {
-      // the search meant a place: show it
-      mapBridge.fitBbox(body.place.bbox);
-      store.status = `showing ${body.place.query}`;
-    } else {
-      store.status = areaHint;
-    }
-  } catch (error) {
-    s.results = [];
-    s.searched = false; // an error is not "no feeds found"
-    store.status = error.message;
-  } finally {
-    s.searching = false;
-  }
 }
 
 // The bbox the Search tab's area selector points at, or null.
@@ -1059,11 +414,19 @@ function downloadBody(feed) {
 }
 
 export async function downloadFeed(feed) {
+  if (store.search.downloadingId || store.search.bulk.running) return;
+  if (store.validating || store.saving || writesPending()) {
+    // Downloads activate a new backend current feed; that must not
+    // interleave with the validation sweep or a running save.
+    store.status = "busy — try again in a moment";
+    return;
+  }
   const body = downloadBody(feed);
   if (!body) return;
   store.search.downloadingId = feed.id;
   try {
     await api("POST", "/api/catalogue/download", body);
+    logPlain("Feed downloaded", feed.provider || feed.id);
     await loadCatalogue();
     await mapBridge.refreshAll(true);
     // Stay on the Search tab: downloading many of an area's feeds in a row
@@ -1077,20 +440,17 @@ export async function downloadFeed(feed) {
   }
 }
 
-// Server-side file browser behind every path box (a web page cannot read
-// absolute paths from a native picker; the loopback backend can). `target`
-// names the field a choice lands in, `mode` whether feeds are pickable.
-export async function openBrowser(target, mode, path) {
+// Server-side folder browser behind the path boxes (a web page cannot
+// read absolute paths from a native picker; the loopback backend can).
+// `target` names the field the chosen folder lands in.
+export async function openBrowser(target, path) {
   // Clear the old listing: entries from the previous target must not be
   // clickable under the new one while its listing is on the way.
   Object.assign(store.browse, {
     target,
-    mode,
     path: "",
     parent: null,
     dirs: [],
-    feeds: [],
-    sessions: [],
     error: "",
   });
   await browseTo(path);
@@ -1112,8 +472,6 @@ export async function browseTo(path) {
       path: listing.path,
       parent: listing.parent,
       dirs: listing.dirs,
-      feeds: listing.feeds || [],
-      sessions: listing.sessions || [],
       error: "",
     });
   } catch (error) {
@@ -1128,25 +486,13 @@ export function closeBrowser() {
   store.browse.open = false;
 }
 
-function applyBrowseChoice(value) {
-  const { target } = store.browse;
-  if (target === "downloadDir") store.search.downloadDir = value;
-  else if (target === "feedPath") store.newFeedPath = value;
-  else if (target === "mergeDir") store.merge.directory = value;
-  else if (target === "sessionPath") store.session.path = value;
-  closeBrowser(); // a pending listing must not reopen it over the choice
-}
-
-export function chooseBrowsedSession(name) {
-  applyBrowseChoice(`${store.browse.path}/${name}`);
-}
-
+// Only folder picking remains: feeds are loaded through the unified
+// search and workspaces through the header/landing page.
 export function chooseBrowsedDir() {
-  applyBrowseChoice(store.browse.path);
-}
-
-export function chooseBrowsedFeed(name) {
-  applyBrowseChoice(`${store.browse.path}/${name}`);
+  const { target, path } = store.browse;
+  if (target === "downloadDir") store.search.downloadDir = path;
+  else if (target === "mergeDir") store.merge.directory = path;
+  closeBrowser(); // a pending listing must not reopen it over the choice
 }
 
 export function toggleFeedSelected(feedId) {
@@ -1164,7 +510,13 @@ export function setAllSelected(feeds, on) {
 // and reporting a summary; each success gets its green check as it lands.
 export async function downloadSelected() {
   const s = store.search;
-  if (s.bulk.running || !s.selected.length) return;
+  if (s.bulk.running || s.downloadingId || !s.selected.length) return;
+  if (store.validating || store.saving || writesPending()) {
+    // Downloads activate a new backend current feed; that must not
+    // interleave with the validation sweep or a running save.
+    store.status = "busy — try again in a moment";
+    return;
+  }
   const queue = s.results.filter((feed) => s.selected.includes(feed.id));
   if (!queue.length) return;
   // Snapshot the folder/crop settings once: a mid-run change to the
@@ -1189,6 +541,7 @@ export async function downloadSelected() {
       s.downloadingId = feed.id;
       try {
         await api("POST", "/api/catalogue/download", body);
+        logPlain("Feed downloaded", feed.provider || feed.id);
         await loadCatalogue();
         const index = s.selected.indexOf(feed.id);
         if (index !== -1) s.selected.splice(index, 1);
@@ -1212,6 +565,17 @@ export async function downloadSelected() {
 }
 
 export async function saveFeed() {
+  if (store.validating || store.historyBusy) {
+    // The sweep repoints the backend's current feed and an undo is
+    // mid-commit; the save endpoint is current-feed-only.
+    store.status = "busy — try again in a moment";
+    return;
+  }
+  // The save targets the feed that was current when it started; the
+  // report must file under that feed even if the user switches away
+  // while the request runs.
+  const feedId = store.currentFeedId;
+  const revision = sessionRevision();
   store.saving = true;
   store.saveResult = null;
   try {
@@ -1220,8 +584,17 @@ export async function saveFeed() {
       acc[notice.severity] = (acc[notice.severity] || 0) + 1;
       return acc;
     }, {});
-    store.report = saved.report;
-    store.reportStale = false;
+    if (feedId) {
+      store.reports = { ...store.reports, [feedId]: saved.report };
+    }
+    // an edit (or undo) that landed while the save ran is NOT in this
+    // report; the mark belongs to the SAVED feed, current or not.
+    if (feedId && sessionRevision() === revision) {
+      const { [feedId]: _cleared, ...rest } = store.staleReportFeeds;
+      store.staleReportFeeds = rest;
+      store.reportStale = Object.keys(rest).some((id) => store.reports[id]);
+    }
+    if (store.currentFeedId === feedId) store.report = saved.report;
     store.saveResult = {
       clean: saved.clean,
       message: saved.clean

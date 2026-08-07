@@ -1,10 +1,10 @@
 // Pure helpers for the OSM network layer. The api-calling actions live in
 // actions.js; the imperative map wiring in map.js.
 
-// Which domain the map edits, from the active tab: the Network tab targets
-// the OSM network, every other tab targets the GTFS feed.
-export function editTarget(activeTab) {
-  return activeTab === "network" ? "network" : "feed";
+// Which domain the map edits, from the active panel: the Streets panel
+// targets the OSM network, every other panel targets the GTFS feed.
+export function editTarget(activePanel) {
+  return activePanel === "streets" ? "network" : "feed";
 }
 
 // Columns that are identity/topology/metadata, not OSM tags.

@@ -3,11 +3,11 @@ import { describe, expect, it } from "vitest";
 import { editTarget, networkTags } from "../src/network.js";
 
 describe("editTarget", () => {
-  it("targets the network only on the Network tab, else the feed", () => {
-    expect(editTarget("network")).toBe("network");
-    expect(editTarget("edit")).toBe("feed");
-    expect(editTarget("catalogue")).toBe("feed");
-    expect(editTarget("report")).toBe("feed");
+  it("targets the network only on the Streets panel, else the feed", () => {
+    expect(editTarget("streets")).toBe("network");
+    expect(editTarget("data")).toBe("feed");
+    expect(editTarget("trips")).toBe("feed");
+    expect(editTarget("validate")).toBe("feed");
   });
 });
 

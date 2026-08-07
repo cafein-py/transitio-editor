@@ -1,0 +1,270 @@
+/* Styling for the components that still predate the redesign: the
+   Data panel's merge collapsible, the server-side FileBrowser, the map
+   toolbar, the basemap control and the attribute drawer. Panel-internal
+   rules are scoped under .legacy; the map overlays and the drawer render
+   outside it and keep their own selectors. This file disappears with the
+   last of those components. */
+.legacy {
+  font: 14px/1.4 var(--sans);
+}
+.legacy .panel {
+  background: #fff;
+  border: 1px solid #e2e0da;
+  border-radius: 6px;
+  padding: 8px;
+  margin-bottom: 10px;
+}
+.legacy .panel summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.legacy button,
+.table-panel button,
+.map-toolbar button {
+  padding: 6px 10px;
+  border: 1px solid #c9c5bb;
+  border-radius: 5px;
+  background: #fff;
+  cursor: pointer;
+}
+.legacy button:hover,
+.table-panel button:hover,
+.map-toolbar button:hover {
+  background: #f0eee9;
+}
+/* The map toolbar is part of the redesign: its active state follows the
+   accent token, not the legacy blue. */
+.map-toolbar button.mode.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.legacy button.primary {
+  background: #35507a;
+  color: #fff;
+  border-color: #35507a;
+  width: 100%;
+}
+.legacy form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.legacy input,
+.legacy select,
+.table-panel input,
+.table-panel select {
+  padding: 6px;
+  border: 1px solid #c9c5bb;
+  border-radius: 5px;
+}
+.legacy .hint,
+.table-panel .hint {
+  margin: 4px 0 0;
+  color: #666;
+  font-size: 12px;
+}
+.legacy #status {
+  color: #a33;
+  min-height: 1.2em;
+  font-size: 13px;
+}
+.legacy .swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+.legacy .check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #555;
+}
+.legacy .check input {
+  width: auto;
+}
+.legacy .dir-row {
+  display: flex;
+  gap: 4px;
+}
+.legacy .dir-row input {
+  flex: 1;
+}
+.legacy .dir-browser {
+  border: 1px solid #e2e0da;
+  border-radius: 5px;
+  padding: 6px;
+  font-size: 12px;
+}
+.legacy .dir-browser .dir-path {
+  font-weight: 600;
+  word-break: break-all;
+  margin-bottom: 4px;
+}
+.legacy .dir-browser .dir-list {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.legacy .dir-browser .dir-list button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  padding: 2px 4px;
+  background: none;
+}
+.legacy .dir-browser .dir-list button:hover {
+  background: #f0eee9;
+}
+/* Map overlays and the attribute drawer (outside the aside). */
+.map-toolbar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid #c9c5bb;
+  border-radius: 6px;
+  padding: 5px 7px;
+  box-shadow: var(--shadow-overlay);
+  font: 14px/1.4 var(--sans);
+  flex-wrap: wrap;
+  max-width: 60vw;
+}
+.map-toolbar .snap {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  font-size: 12px;
+}
+.map-toolbar .hint {
+  color: #666;
+  font-size: 12px;
+}
+.basemap-control {
+  position: relative;
+  font: 14px/1.4 var(--sans);
+}
+.basemap-control > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid #c9c5bb;
+  border-radius: 6px;
+  padding: 5px 9px;
+  font-size: 12px;
+  box-shadow: var(--shadow-overlay);
+  cursor: pointer;
+}
+.basemap-control > button svg {
+  width: 13px;
+  height: 13px;
+  display: block;
+  color: var(--ink-3);
+}
+.basemap-control ul {
+  list-style: none;
+  margin: 0 0 4px;
+  padding: 4px;
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  min-width: 150px;
+  background: #fff;
+  border: 1px solid #c9c5bb;
+  border-radius: 6px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+}
+.basemap-control li button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  padding: 4px 6px;
+  font-size: 12px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.basemap-control li button:hover {
+  background: #f0eee9;
+}
+.basemap-control li button.active {
+  font-weight: 700;
+}
+.table-panel {
+  height: 40%;
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid #ccc;
+  background: #fff;
+  font: 14px/1.4 var(--sans);
+}
+.table-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px;
+  border-bottom: 1px solid #eee;
+}
+.table-bar input {
+  flex: 1;
+  min-width: 80px;
+}
+.table-bar .table-count {
+  font-size: 12px;
+  color: #666;
+  white-space: nowrap;
+}
+.table-bar .table-close {
+  color: #a33;
+}
+.table-scroll {
+  flex: 1;
+  overflow: auto;
+}
+.attr-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+}
+.attr-table th {
+  position: sticky;
+  top: 0;
+  background: #f7f6f3;
+  text-align: left;
+  padding: 3px 8px;
+  border-bottom: 1px solid #ddd;
+  white-space: nowrap;
+}
+.attr-table td {
+  padding: 2px 8px;
+  border-bottom: 1px solid #f0eee9;
+  white-space: nowrap;
+}
+.attr-popup .attr-title {
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.attr-popup table {
+  border-collapse: collapse;
+}
+.attr-popup th {
+  text-align: left;
+  color: #666;
+  font-weight: 500;
+  padding: 1px 8px 1px 0;
+  vertical-align: top;
+}
+.attr-popup td {
+  padding: 1px 0;
+}

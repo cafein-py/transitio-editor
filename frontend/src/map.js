@@ -6,7 +6,17 @@ import "maplibre-gl/dist/maplibre-gl.css";
 
 import { api } from "./api.js";
 import { BASEMAPS, basemapLayerId } from "./basemaps.js";
+import { setNetworkEntities, setStopsData } from "./entities.js";
+import {
+  initStreetsHandles,
+  initStreetsLayers,
+  refreshStreets,
+  selectWay,
+  setStreetsVisible,
+} from "./map/streets.js";
+import { logServerEdit } from "./session.js";
 import { SNAP_FILTERS, store } from "./store.js";
+import { wayHighway } from "./streets.js";
 import { cropShapeFromRing } from "./catalogue.js";
 import { editTarget } from "./network.js";
 import {
@@ -50,10 +60,16 @@ let previewSettled = Promise.resolve(); // the latest draw/snap update
 
 // The preview after any in-flight snap lands — what Finish must save.
 export async function previewCoordsSettled() {
-  try {
-    await previewSettled;
-  } catch (error) {
-    /* the click handler already reported the snap failure */
+  // A click during the await replaces previewSettled; keep draining
+  // until the promise stops changing, so Finish saves the newest points.
+  for (let guard = 0; guard < 20; guard += 1) {
+    const pending = previewSettled;
+    try {
+      await pending;
+    } catch (error) {
+      /* the click handler already reported the snap failure */
+    }
+    if (previewSettled === pending) break;
   }
   return previewCoords;
 }
@@ -115,13 +131,53 @@ export function jumpTo(center, zoom) {
   if (map) map.jumpTo({ center, zoom });
 }
 
-export function fitToStops() {
-  if (!map || !lastStops || !lastStops.features.length) return;
+// Fly close to a point (a double-clicked list row); never zooms OUT past
+// a view the user already narrowed further.
+export function flyToPoint(center, zoom = 16) {
+  if (map) map.flyTo({ center, zoom: Math.max(map.getZoom(), zoom) });
+}
+
+// Longitudes are unwrapped around the first point: a feed with stops on
+// both sides of the antimeridian would otherwise fit the whole globe.
+function fitPoints(points) {
+  if (!map || !points.length) return;
+  const [originLng] = points[0];
   const bounds = new maplibregl.LngLatBounds();
-  for (const feature of lastStops.features) {
-    bounds.extend(feature.geometry.coordinates);
+  for (const [lng, lat] of points) {
+    let unwrapped = lng;
+    while (unwrapped - originLng > 180) unwrapped -= 360;
+    while (originLng - unwrapped > 180) unwrapped += 360;
+    bounds.extend([unwrapped, lat]);
   }
   map.fitBounds(bounds, { padding: 60, maxZoom: 15 });
+}
+
+export function fitToStops() {
+  if (!lastStops) return;
+  fitPoints(lastStops.features.map((f) => f.geometry.coordinates));
+}
+
+// Fit the map to a set of shapes of one feed (a route's geometry, a
+// shape-only validation notice).
+let lastShapes = null;
+
+export function fitShapes(shapeIds, feedId) {
+  if (!map || !lastShapes || !shapeIds || !shapeIds.length) return false;
+  const wanted = new Set(shapeIds);
+  const points = [];
+  for (const feature of lastShapes.features) {
+    const properties = feature.properties;
+    if (!wanted.has(properties.shape_id)) continue;
+    if (feedId && properties.feed_id !== feedId) continue;
+    const coords =
+      feature.geometry.type === "MultiLineString"
+        ? feature.geometry.coordinates.flat()
+        : feature.geometry.coordinates;
+    points.push(...coords);
+  }
+  if (!points.length) return false;
+  fitPoints(points);
+  return true;
 }
 
 export function fitBbox(bbox) {
@@ -336,33 +392,52 @@ let summarySeq = 0; // a pre-restore summary must not paint over a newer one
 
 async function refreshSummary() {
   const seq = ++summarySeq;
-  const summary = await api("GET", "/api/feed");
-  if (seq !== summarySeq) return;
-  store.source = summary.source;
-  store.tables = summary.tables;
-  store.currentFeedId = summary.currentFeedId ?? null;
-  store.snapAvailable = Boolean(summary.snapAvailable);
-  store.undoLabel = summary.undo ?? null;
-  store.redoLabel = summary.redo ?? null;
-  // Keep the current feed's catalogue counts in step with its table sizes
-  // so the Catalogue tab doesn't show stale counts after a mutation.
-  const entry = store.catalogue.find((f) => f.feed_id === store.currentFeedId);
-  if (entry) entry.tables = summary.tables;
-  // Re-fetch the catalogue so derived per-feed info (mode chips) follows
-  // edits like adding a route with a new transport type.
-  try {
-    const catalogue = await api("GET", "/api/catalogue");
+  // The summary and the catalogue are two samples of the same backend
+  // state; a feed switch between them would blend two feeds' fields.
+  // Retry once on mismatch; if still unstable, discard the per-feed
+  // summary fields rather than show one feed's tables under another's id.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const summary = await api("GET", "/api/feed");
     if (seq !== summarySeq) return;
-    store.catalogue = catalogue.feeds;
-    if (catalogue.current !== store.currentFeedId) {
-      // the current feed changed between the two samples: the labels
-      // above belong to the OLD feed and must not stay actionable
+    let catalogue = null;
+    try {
+      catalogue = await api("GET", "/api/catalogue");
+    } catch (error) {
+      /* catalogue refresh is best-effort */
+    }
+    if (seq !== summarySeq) return;
+    const summaryFeed = summary.currentFeedId ?? null;
+    if (catalogue && catalogue.current !== summaryFeed) {
+      if (attempt === 0) continue; // resample: the two disagreed
+      // still unstable: trust the catalogue's current feed, drop the
+      // summary-derived per-feed fields instead of misattributing them
+      store.catalogue = catalogue.feeds;
+      store.currentFeedId = catalogue.current;
+      store.source = null;
+      store.tables = {};
       store.undoLabel = null;
       store.redoLabel = null;
+      store.snapAvailable = Boolean(summary.snapAvailable);
+      return;
     }
-    store.currentFeedId = catalogue.current;
-  } catch (error) {
-    /* summary already updated; catalogue refresh is best-effort */
+    store.source = summary.source;
+    store.tables = summary.tables;
+    store.currentFeedId = summaryFeed;
+    store.snapAvailable = Boolean(summary.snapAvailable);
+    store.undoLabel = summary.undo ?? null;
+    store.redoLabel = summary.redo ?? null;
+    if (catalogue) {
+      store.catalogue = catalogue.feeds;
+      store.currentFeedId = catalogue.current;
+    } else {
+      // keep the current feed's catalogue counts in step with its
+      // table sizes when the catalogue re-fetch was unavailable
+      const entry = store.catalogue.find(
+        (f) => f.feed_id === store.currentFeedId,
+      );
+      if (entry) entry.tables = summary.tables;
+    }
+    return;
   }
 }
 export { refreshSummary };
@@ -377,23 +452,21 @@ async function refreshLayers(fit) {
   ]);
   if (seq !== refreshSeq) return;
   lastStops = stops;
+  lastShapes = shapes;
   map.getSource("stops").setData(stops);
   map.getSource("shapes").setData(shapes);
+  setStopsData(stops.features);
+  store.dataVersion += 1; // panel lists recompute
   // The legend offers only modes the loaded feeds actually contain.
   store.presentModes = presentModeCodes(shapes.features);
   if (fit && stops.features.length) {
-    const bounds = new maplibregl.LngLatBounds();
-    for (const feature of stops.features) {
-      bounds.extend(feature.geometry.coordinates);
-    }
-    map.fitBounds(bounds, { padding: 60, maxZoom: 15 });
+    fitPoints(stops.features.map((feature) => feature.geometry.coordinates));
   }
 }
 
 export async function refreshAll(fit) {
-  // Every mutation path funnels through here, so the last validation
-  // report is marked stale even for unwrapped actions (map clicks).
-  if (store.report) store.reportStale = true;
+  // Pure visibility refreshes route through here too, so staleness is
+  // NOT flagged here — the session log marks it for real mutations.
   await refreshSummary();
   await refreshLayers(fit);
 }
@@ -420,8 +493,11 @@ export function highlightContext(context) {
   const stopIds = [];
   const shapeIds = [];
   for (const [key, value] of Object.entries(context)) {
-    if (/stopid/i.test(key)) stopIds.push(String(value));
-    if (/shapeid/i.test(key)) shapeIds.push(String(value));
+    // contexts use both `stop_id` and `stopId` spellings; compare with
+    // punctuation removed so neither is missed
+    const flat = key.replace(/[^a-z]/gi, "").toLowerCase();
+    if (flat.includes("stopid")) stopIds.push(String(value));
+    if (flat.includes("shapeid")) shapeIds.push(String(value));
   }
   setHighlight(stopIds, shapeIds);
   if (stopIds.length && lastStops) {
@@ -433,23 +509,31 @@ export function highlightContext(context) {
     );
     if (hit) {
       map.flyTo({ center: hit.geometry.coordinates, zoom: 15 });
+      return;
     }
   }
+  // No stop to fly to (a shape-only notice): fit the highlighted shapes
+  // so the chip always takes the user to what it highlighted.
+  if (shapeIds.length) fitShapes(shapeIds, store.currentFeedId);
 }
 
 async function handleMapClick(event) {
   // Map clicks mutate the feed (move/add stop, draw); inert while the OSM
   // network is the edit target.
-  if (editTarget(store.activeTab) !== "feed") return;
+  if (editTarget(store.activePanel) !== "feed") return;
+  const feedId = store.currentFeedId; // pinned before any await
   const { lng, lat } = event.lngLat;
   try {
     if (store.movingStop) {
-      await api("PATCH", `/api/stops/${encodeURIComponent(store.movingStop)}`, {
+      const movingStop = store.movingStop;
+      await api("PATCH", `/api/stops/${encodeURIComponent(movingStop)}`, {
         stop_lat: lat,
         stop_lon: lng,
       });
+      logServerEdit("Stop moved", movingStop, feedId);
       store.movingStop = null;
       store.status = "";
+      store.dirty = true;
       await refreshAll(false);
       return;
     }
@@ -463,6 +547,8 @@ async function handleMapClick(event) {
         stop_lat: lat,
         stop_lon: lng,
       });
+      logServerEdit("Stop added", stopId, feedId);
+      store.dirty = true;
       await refreshAll(false);
       return;
     }
@@ -476,9 +562,17 @@ async function handleMapClick(event) {
           const request = { waypoints: [...drawnPoints] };
           const filter = SNAP_FILTERS[store.snapNetwork];
           if (filter) request.custom_filter = filter;
-          const feature = await api("POST", "/api/shapes/snap", request);
-          if (sequence !== drawSequence) return; // superseded by a newer click
-          previewCoords = feature.geometry.coordinates;
+          try {
+            const feature = await api("POST", "/api/shapes/snap", request);
+            if (sequence !== drawSequence) return; // superseded by a newer click
+            previewCoords = feature.geometry.coordinates;
+          } catch (error) {
+            if (sequence !== drawSequence) return;
+            // A failed snap must not leave the preview missing the
+            // newest point — fall back to the raw polyline and say so.
+            previewCoords = drawnPoints.map(([a, b]) => [b, a]);
+            store.status = `snapping failed — using straight lines (${error.message})`;
+          }
         } else {
           previewCoords = drawnPoints.map(([a, b]) => [b, a]);
         }
@@ -523,11 +617,16 @@ export function createMap() {
     center: [24.94, 60.17],
     zoom: 11,
   });
-  map.addControl(new maplibregl.NavigationControl());
+  // Bottom-right: the floating stop card owns the map's top-right corner.
+  map.addControl(new maplibregl.NavigationControl(), "bottom-right");
+  // The "In map view" list scope recomputes off this counter.
+  map.on("moveend", () => {
+    store.mapMoved += 1;
+  });
 
   map.on("load", async () => {
     syncBasemapLayers(); // a choice made before the style built lands now
-    for (const id of ["stops", "shapes", "network-ways", "network-nodes"]) {
+    for (const id of ["stops", "shapes", "network-ways"]) {
       map.addSource(id, {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
@@ -591,32 +690,9 @@ export function createMap() {
         "circle-stroke-width": 2,
       },
     });
-    // OSM network under the GTFS layers: ways always, nodes only when zoomed
-    // in (a whole-city node layer is too dense otherwise).
-    map.addLayer({
-      id: "network-ways",
-      type: "line",
-      source: "network-ways",
-      layout: { visibility: "none" },
-      paint: {
-        "line-color": "#7a4fbf",
-        "line-width": 1.5,
-        "line-opacity": 0.6,
-      },
-    });
-    map.addLayer({
-      id: "network-nodes",
-      type: "circle",
-      source: "network-nodes",
-      minzoom: 15,
-      layout: { visibility: "none" },
-      paint: {
-        "circle-radius": 3,
-        "circle-color": "#7a4fbf",
-        "circle-stroke-color": "#fff",
-        "circle-stroke-width": 1,
-      },
-    });
+    // The street network under the GTFS layers, styled by highway class
+    // (the design's colour/width/dash scale lives in map/streets.js).
+    initStreetsLayers(map, { refreshNetwork: fetchNetwork });
     // A white casing under the route lines separates them from the busy
     // basemap (and from each other), keeping even light hues readable.
     map.addLayer({
@@ -650,23 +726,6 @@ export function createMap() {
         "line-dasharray": [2, 1],
       },
     });
-    map.addSource("network-preview", {
-      type: "geojson",
-      data: {
-        type: "Feature",
-        geometry: { type: "LineString", coordinates: [] },
-      },
-    });
-    map.addLayer({
-      id: "network-preview",
-      type: "line",
-      source: "network-preview",
-      paint: {
-        "line-color": "#7a4fbf",
-        "line-width": 3,
-        "line-dasharray": [2, 1],
-      },
-    });
     map.addLayer({
       id: "shapes-highlight",
       type: "line",
@@ -676,17 +735,23 @@ export function createMap() {
     });
     // Stop size follows the zoom, so a whole-region feed reads as dots
     // instead of covering the map; street zooms keep the clickable size.
+    // The low end stays tiny: a dense city feed at city scale must not
+    // blanket the basemap.
     const stopRadius = (scale) => [
       "interpolate",
       ["linear"],
       ["zoom"],
       7,
-      1.5 * scale,
+      0.8 * scale,
       10,
-      3 * scale,
-      13,
-      6 * scale,
+      1.6 * scale,
+      12,
+      2.4 * scale,
+      14,
+      4.5 * scale,
       16,
+      7 * scale,
+      18,
       9 * scale,
     ];
     map.addLayer({
@@ -702,9 +767,13 @@ export function createMap() {
           ["linear"],
           ["zoom"],
           7,
-          0.5,
-          13,
-          1.5,
+          0.3,
+          12,
+          0.7,
+          14,
+          1.2,
+          16,
+          1.8,
         ],
       },
     });
@@ -739,51 +808,42 @@ export function createMap() {
       },
       "shapes",
     );
-    map.addLayer(
-      {
-        id: "stops-selected",
-        type: "circle",
-        source: "stops",
-        filter: NO_SELECTION,
-        paint: {
-          "circle-radius": stopRadius(2.6),
-          "circle-color": SELECT_COLOR,
-          "circle-opacity": 0.9,
-        },
+    // The stop halo sits ABOVE the stops layer: an underlay would be
+    // buried by neighbouring stops in dense areas. The selected stop is
+    // then redrawn enlarged on top of its own halo.
+    map.addLayer({
+      id: "stops-selected",
+      type: "circle",
+      source: "stops",
+      filter: NO_SELECTION,
+      paint: {
+        "circle-radius": stopRadius(2.6),
+        "circle-color": SELECT_COLOR,
+        "circle-opacity": 0.9,
       },
-      "stops",
-    );
-    map.addLayer(
-      {
-        id: "network-ways-selected",
-        type: "line",
-        source: "network-ways",
-        filter: NO_SELECTION,
-        layout: { visibility: "none" },
-        paint: {
-          "line-color": SELECT_COLOR,
-          "line-width": 10.5,
-          "line-opacity": 0.85,
-        },
+    });
+    map.addLayer({
+      id: "stops-selected-marker",
+      type: "circle",
+      source: "stops",
+      filter: NO_SELECTION,
+      paint: {
+        "circle-radius": stopRadius(1.45),
+        "circle-color": ["coalesce", ["get", "feed_color"], "#e67e22"],
+        "circle-stroke-color": "#fff",
+        "circle-stroke-width": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          7,
+          0.8,
+          13,
+          2,
+        ],
       },
-      "network-ways",
-    );
-    map.addLayer(
-      {
-        id: "network-nodes-selected",
-        type: "circle",
-        source: "network-nodes",
-        minzoom: 15,
-        filter: NO_SELECTION,
-        layout: { visibility: "none" },
-        paint: {
-          "circle-radius": 10,
-          "circle-color": SELECT_COLOR,
-          "circle-opacity": 0.9,
-        },
-      },
-      "network-nodes",
-    );
+    });
+    // Vertex handles above everything, including the GTFS layers.
+    initStreetsHandles(map);
 
     map.on("click", "stops", (event) => {
       if (store.aoiDrawing || croppingClick()) return; // a drawing gesture
@@ -791,7 +851,7 @@ export function createMap() {
       // While editing the OSM network, stops are context: ignore them
       // silently (no preventDefault) so a network feature under the same
       // click stays inspectable.
-      if (editTarget(store.activeTab) !== "feed") return;
+      if (editTarget(store.activePanel) !== "feed") return;
       // Co-located stops from several active feeds can share one click;
       // prefer the current feed's stop so it stays editable under an
       // overlay. Edits target the current feed; others are context only.
@@ -825,45 +885,16 @@ export function createMap() {
           name: properties.stop_name || "",
           feedId: properties.feed_id || null,
         };
+        // Selection state only: panels react to it in place — a map
+        // click never navigates away from the panel in use.
+        store.selectedStopId = {
+          stopId: properties.stop_id,
+          feedId: properties.feed_id || null,
+        };
         setSelectedStop(properties);
       }
       event.preventDefault();
     });
-    // One handler over both network layers: two separate listeners would
-    // both fire where a node sits on its way and race to set the selection.
-    map.on("click", ["network-nodes", "network-ways"], (event) => {
-      if (event.defaultPrevented || store.aoiDrawing || croppingClick()) return;
-      // In add-node/move-node/draw-way mode a click on a road/node is a
-      // placement, not a selection: fall through to the general handler.
-      if (
-        editTarget(store.activeTab) === "network" &&
-        (store.network.mode === "add-node" ||
-          store.network.mode === "draw-way" ||
-          store.network.movingNode != null)
-      ) {
-        return;
-      }
-      if (editTarget(store.activeTab) !== "network") {
-        // On the feed tab the network is context. Hint only when the click
-        // hit no feed feature — a stop or shape under the same click must
-        // stay selectable, so never preventDefault here.
-        const feedHit = map.queryRenderedFeatures(event.point, {
-          layers: ["stops", "shapes"],
-        }).length;
-        if (!feedHit && store.mode === "select" && !store.movingStop) {
-          store.status = "switch to the OSM tab to inspect the network";
-        }
-        return;
-      }
-      const feature =
-        event.features.find((f) => f.properties.osm_type === "node") ||
-        event.features[0];
-      store.network.selected = { ...feature.properties };
-      setSelectedNetworkFeature(feature.properties);
-      store.status = "";
-      event.preventDefault();
-    });
-
     // Attribute cards: hovering a feature while viewing shows its key
     // attributes; clicking a shape pins the card. Values enter the DOM via
     // textContent only.
@@ -933,7 +964,7 @@ export function createMap() {
       ["shapes", "shape"],
     ]) {
       map.on("mousemove", layer, (event) => {
-        if (store.activeTab !== "view" || store.editMode) return;
+        if (editTarget(store.activePanel) !== "feed" || store.editMode) return;
         hoverPopup
           .setLngLat(event.lngLat)
           .setDOMContent(featureCard(event.features[0], kind))
@@ -942,7 +973,9 @@ export function createMap() {
       });
       map.on("mouseleave", layer, () => {
         hoverPopup.remove();
-        if (store.activeTab === "view" && !store.editMode) setCursor("");
+        if (editTarget(store.activePanel) === "feed" && !store.editMode) {
+          setCursor("");
+        }
       });
     }
 
@@ -951,7 +984,7 @@ export function createMap() {
     pinnedPopup.on("close", () => setSelectedShape(null));
     map.on("click", "shapes", (event) => {
       if (event.defaultPrevented || store.aoiDrawing || croppingClick()) return;
-      if (store.activeTab !== "view") return;
+      if (editTarget(store.activePanel) !== "feed") return;
       if (store.mode !== "select" || store.movingStop) return;
       hoverPopup.remove();
       setSelectedShape(event.features[0].properties);
@@ -972,12 +1005,23 @@ export function createMap() {
         return;
       }
       if (event.defaultPrevented || store.aoiDrawing || croppingClick()) return;
-      if (editTarget(store.activeTab) === "network") {
-        handleNetworkClick(event);
-      } else if (store.activeTab === "view" && store.editMode) {
+      if (editTarget(store.activePanel) === "network") {
+        // An empty streets click deselects the way (way clicks arrive
+        // default-prevented from the class-layer handler).
+        selectWay(null);
+        return;
+      }
+      if (store.editMode) {
         // Feed mutations only with the editing switch on: an armed mode
         // (add stop, draw) must not fire while just viewing.
         handleMapClick(event);
+      }
+      // A click on empty map in select mode deselects the stop (feature
+      // clicks never reach here — their handlers preventDefault above).
+      if (store.mode === "select" && !store.movingStop && !store.tripPicking) {
+        store.inspector = null;
+        store.selectedStopId = null;
+        setSelectedStop(null);
       }
     });
 
@@ -1051,7 +1095,8 @@ export function createMap() {
 
     // Releasing the drag outside the canvas never reaches the map's mouseup;
     // a window-level release then cancels the draw so it can't get stuck (the
-    // map handler nulls aoiStart first, so an in-canvas release no-ops here).
+    // map handlers null their start point first, so an in-canvas release
+    // no-ops here). Covers both the AOI box and the crop box.
     window.addEventListener("mouseup", () => {
       if (store.aoiDrawing && aoiStart) {
         aoiStart = null;
@@ -1059,6 +1104,10 @@ export function createMap() {
         map.dragPan.enable();
         setCursor("");
         renderAoi(store.aoi); // discard the in-progress box, keep the prior one
+      }
+      if (store.cropDrawing === "box" && cropBoxStart) {
+        cropBoxStart = null;
+        cancelCropDraw(); // restores dragPan/cursor, clears the drawing
       }
     });
 
@@ -1079,8 +1128,20 @@ export function createMap() {
 
 export function setNetworkData(nodes, ways) {
   if (!map || !map.getSource("network-ways")) return; // style not built yet
+  // The class layers filter on the promoted `highway` property; the JS
+  // classifiers also read the tags dict. Promote tags-only values here
+  // so the map and the list/counts classify identically.
+  for (const feature of ways.features || []) {
+    const properties = feature.properties;
+    if (properties && properties.highway == null) {
+      const value = wayHighway(properties);
+      if (value != null) properties.highway = value;
+    }
+  }
   map.getSource("network-ways").setData(ways);
-  map.getSource("network-nodes").setData(nodes);
+  setNetworkEntities(nodes, ways);
+  store.networkVersion += 1; // the Streets panel lists recompute
+  refreshStreets(); // selection card + vertex handles follow the data
 }
 
 // Refetch the network into the map (after an edit or the initial load). One
@@ -1103,68 +1164,6 @@ export async function fetchNetwork() {
   return true;
 }
 
-// Map-click edits to the network (add/move a node), the network-side
-// counterpart of handleMapClick; button edits live in actions.js.
-function renderNetworkPreview() {
-  const source = map && map.getSource("network-preview");
-  if (source) {
-    source.setData({
-      type: "Feature",
-      geometry: {
-        type: "LineString",
-        coordinates: store.network.draw.map((v) => v.coord),
-      },
-    });
-  }
-}
-
-export function clearNetworkDraw() {
-  store.network.draw = [];
-  renderNetworkPreview();
-}
-
-async function handleNetworkClick(event) {
-  const net = store.network;
-  // Acquisition is swapping the network out; ignore edits until it settles,
-  // so a click can't act on the old (or mid-swap) features.
-  if (net.acquire.downloading) return;
-  const { lng, lat } = event.lngLat;
-  if (net.mode === "draw-way") {
-    // Resolve the click against what is under it: an existing node is reused,
-    // an existing way is split into a junction, empty space is a new node.
-    const under = map.queryRenderedFeatures(event.point, {
-      layers: ["network-nodes", "network-ways"],
-    });
-    const node = under.find((f) => f.properties.osm_type === "node");
-    const way = under.find((f) => f.properties.osm_type === "way");
-    let vertex;
-    if (node) vertex = { node: node.properties.id };
-    else if (way) vertex = { split_way: way.properties.id, lon: lng, lat };
-    else vertex = { lon: lng, lat };
-    net.draw.push({ vertex, coord: [lng, lat] });
-    renderNetworkPreview();
-    return;
-  }
-  try {
-    if (net.movingNode != null) {
-      await api("PATCH", `/api/network/nodes/${net.movingNode}`, {
-        lon: lng,
-        lat,
-      });
-      net.movingNode = null;
-      store.status = "";
-      await fetchNetwork();
-      return;
-    }
-    if (net.mode === "add-node") {
-      await api("POST", "/api/network/nodes", { lon: lng, lat });
-      await fetchNetwork();
-    }
-  } catch (error) {
-    store.status = error.message;
-  }
-}
-
 function setGroupVisible(layers, visible) {
   if (!map) return;
   const value = visible ? "visible" : "none";
@@ -1175,16 +1174,10 @@ function setGroupVisible(layers, visible) {
   }
 }
 
+// Street-network visibility routes through the streets module (it knows
+// the per-class hidden set).
 export function setNetworkVisible(visible) {
-  setGroupVisible(
-    [
-      "network-ways",
-      "network-nodes",
-      "network-ways-selected",
-      "network-nodes-selected",
-    ],
-    visible,
-  );
+  setStreetsVisible(visible);
 }
 
 export function setFeedVisible(visible) {
@@ -1194,57 +1187,71 @@ export function setFeedVisible(visible) {
   );
   // Stops track both toggles: the feed group and the stops switch.
   setGroupVisible(
-    ["stops", "stops-highlight", "stops-selected"],
+    ["stops", "stops-highlight", "stops-selected", "stops-selected-marker"],
     visible && store.stopsVisible,
   );
 }
 
 export function setStopsVisible(visible) {
   setGroupVisible(
-    ["stops", "stops-highlight", "stops-selected"],
+    ["stops", "stops-highlight", "stops-selected", "stops-selected-marker"],
     store.feedVisible && visible,
   );
 }
 
 export function setSelectedStop(properties) {
   if (!map || !map.getLayer("stops-selected")) return;
-  map.setFilter(
-    "stops-selected",
-    properties
-      ? [
-          "all",
-          ["==", ["get", "stop_id"], properties.stop_id],
-          ["==", ["get", "feed_id"], properties.feed_id],
-        ]
-      : NO_SELECTION,
-  );
+  const filter = properties
+    ? [
+        "all",
+        ["==", ["get", "stop_id"], properties.stop_id],
+        ["==", ["get", "feed_id"], properties.feed_id],
+      ]
+    : NO_SELECTION;
+  map.setFilter("stops-selected", filter);
+  map.setFilter("stops-selected-marker", filter);
 }
 
 export function setSelectedShape(properties) {
+  setSelectedShapes(
+    properties ? [properties.shape_id] : [],
+    properties ? properties.feed_id : null,
+  );
+}
+
+// The amber halo over one or many shapes (a route's geometry is all the
+// shapes its trips reference).
+export function setSelectedShapes(shapeIds, feedId) {
   if (!map || !map.getLayer("shapes-selected")) return;
-  selectedShapeFilter = properties
+  selectedShapeFilter = shapeIds && shapeIds.length
     ? [
         "all",
-        ["==", ["get", "shape_id"], properties.shape_id],
-        ["==", ["get", "feed_id"], properties.feed_id],
+        ["in", ["get", "shape_id"], ["literal", [...shapeIds]]],
+        ...(feedId ? [["==", ["get", "feed_id"], feedId]] : []),
       ]
     : NO_SELECTION;
   map.setFilter("shapes-selected", withModeFilter(selectedShapeFilter));
 }
 
-export function setSelectedNetworkFeature(properties) {
-  if (!map || !map.getLayer("network-ways-selected")) return;
-  map.setFilter(
-    "network-ways-selected",
-    properties && properties.osm_type === "way"
-      ? ["==", ["get", "id"], properties.id]
-      : NO_SELECTION,
-  );
-  map.setFilter(
-    "network-nodes-selected",
-    properties && properties.osm_type === "node"
-      ? ["==", ["get", "id"], properties.id]
-      : NO_SELECTION,
+// The Trips route focus: the picked route's shapes stay bright, every
+// other shape drops to opacity .28.
+export function setRouteFocus(shapeIds, feedId) {
+  if (!map || !map.getLayer("shapes")) return;
+  if (!shapeIds || !shapeIds.length) {
+    map.setPaintProperty("shapes", "line-opacity", 1);
+    map.setPaintProperty("shapes-casing", "line-opacity", 0.9);
+    return;
+  }
+  const inFocus = [
+    "all",
+    ["in", ["get", "shape_id"], ["literal", [...shapeIds]]],
+    ...(feedId ? [["==", ["get", "feed_id"], feedId]] : []),
+  ];
+  map.setPaintProperty("shapes", "line-opacity", ["case", inFocus, 1, 0.28]);
+  map.setPaintProperty(
+    "shapes-casing",
+    "line-opacity",
+    ["case", inFocus, 0.9, 0.25],
   );
 }
 
