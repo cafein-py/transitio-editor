@@ -8,12 +8,17 @@ pip install "transitio-editor[snap]"
 transitio-editor feed.zip --osm-pbf helsinki.osm.pbf
 ```
 
-The editor opens on `http://127.0.0.1:8300`: stops and route shapes render
-on a map where they can be added, renamed, moved and drawn — with an OSM
-extract (as fetched by `transitio.fetch_pbf`), drawn route shapes snap to
-the street network. Routes, services and frequency-based trips are created
-from sidebar forms, and saving runs transitio's validator, reporting the
-notice counts of the written feed.
+The editor opens on `http://127.0.0.1:8300`, on a search for GTFS feeds
+and OpenStreetMap extracts by place. Feeds are loaded into one workspace
+sharing one map, where the current feed is the target of edits, validation
+and save. Panels list its stops, routes, services, trips and agencies —
+selecting a row highlights it on the map, and clicking the map selects the
+row — while stops and route shapes are added, renamed, moved and drawn on
+the map itself. With an OSM extract (as fetched by `transitio.fetch_pbf`)
+drawn shapes snap to the street network, whose ways can also be
+reclassified, reshaped and written back. Every edit is recorded in the
+workspace's activity log and can be undone, and saving runs transitio's
+validator, reporting the notice counts of the written feed.
 
 With the transitio core library installed, `transitio edit feed.zip` is an
 alias for the same editor.
